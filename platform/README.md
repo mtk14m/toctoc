@@ -101,11 +101,24 @@ socket.on('groupOrder:item_pending', console.log) // idem en HOST_PAYS : en atte
 
 // la personne : son propre message, avec l'id de commande reçu au moment de rejoindre
 socket.emit('orderItem:watch', { orderItemId }, console.log)
-socket.on('orderItem:updated', console.log) // { orderItemId, status, reason: PAYMENT_CONFIRMED | PAYMENT_FAILED | PAYMENT_TOO_LATE }
+socket.on('orderItem:updated', console.log) // { orderItemId, status, reason: PAYMENT_CONFIRMED | PAYMENT_FAILED | PAYMENT_TOO_LATE | LINK_CLOSED }
 ```
 
 En production, l'adaptateur Redis relaie les évènements entre plusieurs instances de l'API. Les
 deux connexions Redis dédiées qu'il utilise s'ajoutent à celle de l'API.
+
+## La clôture des liens et le récap partenaire
+
+Un job BullMQ tourne chaque minute au démarrage de l'API (Redis requis). Pour chaque lien `SPLIT` dont l'heure
+limite plus 2 minutes de grâce est passée : les commandes encore en attente de paiement sont annulées, le lien
+passe à `CLOSED` (ou `CANCELLED` si personne n'a payé), le groupe l'apprend en direct (`groupOrder:closed`), puis
+le récap est transmis au partenaire.
+
+Sans WhatsApp ni SMS (`PARTNER_NOTIFICATION=console`), le récap **s'écrit dans les logs** : l'équipe le lit et le
+transmet elle-même (`pnpm stack:logs`). Le serveur avertit au démarrage en production. Si l'envoi échoue, il est
+réessayé à chaque passage jusqu'à réussir.
+
+Les liens `HOST_PAYS` ne sont pas encore fermés automatiquement (la charge unique du créateur reste à construire).
 
 ## Commandes
 
