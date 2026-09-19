@@ -1,6 +1,6 @@
 # TocToc — Documentation stratégique
 
-Statut : **phase de réflexion**. Aucun code n'est écrit tant que cette base n'est pas validée. Objectif : concevoir un produit qui peut gagner dans un marché déjà disputé par des acteurs mieux capitalisés, sans les affronter de front.
+Statut : **développement de l'API en cours** (code dans [`../platform`](../platform/README.md)), sur la base de cette réflexion produit. Objectif : concevoir un produit qui peut gagner dans un marché déjà disputé par des acteurs mieux capitalisés, sans les affronter de front.
 
 ## Lecture recommandée, dans l'ordre
 

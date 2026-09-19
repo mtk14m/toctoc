@@ -27,7 +27,7 @@ TocToc reste un **projet séparé** (dépôt Git distinct, comme CityMoov l'est 
 | Tests Vitest, arborescence de tests qui reflète `src/` (`tests/routes/`, `tests/services/`, `tests/lib/`) | `tests/` | Repris tel quel |
 | OTP par WhatsApp souhaité, SMS en secours | à construire — **correction** : `services/whatsapp.ts` dans CityMoov envoie en réalité par SMS (gateway EasySendSMS), pas par WhatsApp, malgré son nom ; `services/sms.ts` utilise Twilio. Aucun des deux n'est une vraie intégration WhatsApp | **Rien à réutiliser tel quel ici** — l'envoi d'OTP par WhatsApp reste à construire pour TocToc : choisir un fournisseur (API Cloud WhatsApp officielle de Meta, ou un agrégateur), et vérifier les contraintes réelles (validation du compte professionnel Meta, approbation préalable des modèles de message pour un envoi proactif comme un code OTP). Le SMS (pattern Twilio de `services/sms.ts`) reste la valeur de repli fiable et déjà éprouvée en attendant |
 | Stockage de fichiers via MinIO (S3-compatible, auto-hébergé) | `services/storage.ts` | Utile plus tard pour les photos de plats, pas indispensable au tout premier test |
-| Monorepo pnpm + Turborepo, `apps/api` + `apps/web` + `packages/types|config|utils` partagés | racine `citimoov-v2/` | Même structure de monorepo pour TocToc (dépôt séparé) : `apps/api` (Fastify), `apps/web` (React), `packages/types` partagé au minimum |
+| Monorepo pnpm + Turborepo, `apps/api` + `apps/web` + `packages/types|config|utils` partagés | racine `citimoov-v2/` | Même structure de monorepo pnpm, dans le dossier `platform/` de ce dépôt : `apps/api` (Fastify), `apps/web` (React), `packages/types` partagé au minimum. **Turborepo est repoussé** : avec une seule app, `pnpm -r` suffit ; on l'ajoutera avec `apps/web` quand l'orchestration des builds aura un intérêt réel |
 | Docker Compose (dev : Postgres + Redis + MinIO ; prod complet) + Caddy comme reverse proxy avec SSL automatique | `infra/` | Repris tel quel pour le déploiement sur VPS |
 
 ## Comment ça se traduit dans le domaine TocToc
@@ -41,10 +41,10 @@ TocToc reste un **projet séparé** (dépôt Git distinct, comme CityMoov l'est 
 | Auth client par téléphone + OTP (`routes/auth.ts`) | Structure reprise pour le **relais** (revient chaque jour, OTP justifié) ; un participant qui rejoint un lien une seule fois n'en a pas besoin — voir la précision dans [06-fonctionnalite-lancement.md](06-fonctionnalite-lancement.md) et [08-schema-donnees.md](08-schema-donnees.md) |
 | `matchingWorker` (assignation chauffeur ↔ course, temps réel) | Pas nécessaire en Phase 1 — la livraison du déjeuner est planifiée à heure fixe, pas de matching à la demande (voir [09-workflows.md](09-workflows.md)) |
 
-## Structure de projet proposée (nouveau dépôt)
+## Structure de projet (dans `platform/`, même dépôt que `docs/`)
 
 ```
-toctoc-app/
+platform/
 ├── apps/
 │   ├── api/          # Fastify — même arborescence que citimoov-v2/apps/api
 │   │   └── src/
