@@ -1,6 +1,15 @@
 import type { AppDeps } from '../../src/deps.js'
 import type { AuthUser, UserStore } from '../../src/services/auth.js'
 import type { RateLimiter } from '../../src/lib/rate-limiter.js'
+import type {
+  GroupOrderRecord,
+  GroupOrderStore,
+  MenuEntry,
+  NewGroupOrder,
+  OrderItemEntry,
+  PartnerSummary,
+} from '../../src/services/group-order.js'
+import type { GroupOrderStatus } from '../../src/generated/prisma/enums.js'
 import type { OtpRecord, OtpSender, OtpStore } from '../../src/services/otp.js'
 
 interface StoredOtp extends OtpRecord {
@@ -82,6 +91,67 @@ export class InMemoryUserStore implements UserStore {
   }
 }
 
+export class InMemoryGroupOrderStore implements GroupOrderStore {
+  partners: PartnerSummary[] = []
+  menuItems: Array<MenuEntry & { partnerId: string; availableDate: Date; active: boolean }> = []
+  orderItems: Array<OrderItemEntry & { groupOrderId: string }> = []
+  groupOrders: Array<NewGroupOrder & { id: string; status: GroupOrderStatus }> = []
+  private sequence = 0
+
+  /** Le nom du créateur vient des utilisateurs : en base, c'est une jointure. */
+  constructor(private readonly users: InMemoryUserStore) {}
+
+  async findPartner(id: string): Promise<PartnerSummary | null> {
+    return this.partners.find((p) => p.id === id) ?? null
+  }
+
+  async create(input: NewGroupOrder): Promise<{ id: string; status: GroupOrderStatus }> {
+    this.sequence += 1
+    const record = { ...input, id: `group_${this.sequence}`, status: 'OPEN' as const }
+    this.groupOrders.push(record)
+    return { id: record.id, status: record.status }
+  }
+
+  async findByShareToken(shareToken: string): Promise<GroupOrderRecord | null> {
+    const order = this.groupOrders.find((o) => o.shareToken === shareToken)
+    if (!order) return null
+
+    const partner = this.partners.find((p) => p.id === order.partnerId)
+    const creator = this.users.users.find((u) => u.id === order.creatorId)
+    if (!partner || !creator) throw new Error('Données de test incohérentes')
+
+    return {
+      id: order.id,
+      status: order.status,
+      deliveryAddress: order.deliveryAddress,
+      orderCutoffTime: order.orderCutoffTime,
+      deliveryTime: order.deliveryTime,
+      paymentMode: order.paymentMode,
+      creatorName: creator.name,
+      partner: { id: partner.id, name: partner.name, type: partner.type },
+    }
+  }
+
+  async listMenu(partnerId: string, date: Date): Promise<MenuEntry[]> {
+    return this.menuItems
+      .filter(
+        (m) =>
+          m.partnerId === partnerId && m.active && m.availableDate.getTime() === date.getTime(),
+      )
+      .map(({ id, name, description, price, photoUrl }) => ({
+        id,
+        name,
+        description,
+        price,
+        photoUrl,
+      }))
+  }
+
+  async listOrderItems(groupOrderId: string): Promise<OrderItemEntry[]> {
+    return this.orderItems.filter((i) => i.groupOrderId === groupOrderId)
+  }
+}
+
 export class InMemoryRateLimiter implements RateLimiter {
   private counts = new Map<string, number>()
 
@@ -109,9 +179,11 @@ export class RecordingOtpSender implements OtpSender {
 }
 
 export function createTestDeps() {
+  const userStore = new InMemoryUserStore()
   return {
     otpStore: new InMemoryOtpStore(),
-    userStore: new InMemoryUserStore(),
+    userStore,
+    groupOrderStore: new InMemoryGroupOrderStore(userStore),
     rateLimiter: new InMemoryRateLimiter(),
     otpSender: new RecordingOtpSender(),
   } satisfies AppDeps
