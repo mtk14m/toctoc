@@ -2,6 +2,7 @@ import type { RateLimiter } from './lib/rate-limiter.js'
 import type { UserStore } from './services/auth.js'
 import type { GroupOrderStore } from './services/group-order.js'
 import type { OtpSender, OtpStore } from './services/otp.js'
+import type { PartnerStore } from './services/partner.js'
 
 /**
  * Tout ce que l'application utilise pour parler au monde extérieur (base, Redis, envoi de code).
@@ -12,6 +13,7 @@ export interface AppDeps {
   otpStore: OtpStore
   userStore: UserStore
   groupOrderStore: GroupOrderStore
+  partnerStore: PartnerStore
   rateLimiter: RateLimiter
   otpSender: OtpSender
 }
