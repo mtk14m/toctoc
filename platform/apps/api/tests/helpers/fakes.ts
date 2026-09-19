@@ -123,7 +123,11 @@ export class InMemoryUserStore implements UserStore {
 }
 
 export class InMemoryGroupOrderStore implements GroupOrderStore {
-  partners: PartnerSummary[] = []
+  /** Les heures de service sont optionnelles dans les tests : 9h - minuit, comme le défaut du schéma. */
+  partners: Array<
+    Omit<PartnerSummary, 'serviceStartMinute' | 'serviceEndMinute'> &
+      Partial<Pick<PartnerSummary, 'serviceStartMinute' | 'serviceEndMinute'>>
+  > = []
   menuItems: Array<MenuEntry & { partnerId: string; availableDate: Date; active: boolean }> = []
   /** Les champs financiers et `userId` ne sont renseignés que par les commandes créées via `join`. */
   orderItems: Array<
@@ -144,7 +148,8 @@ export class InMemoryGroupOrderStore implements GroupOrderStore {
   constructor(private readonly users: InMemoryUserStore) {}
 
   async findPartner(id: string): Promise<PartnerSummary | null> {
-    return this.partners.find((p) => p.id === id) ?? null
+    const partner = this.partners.find((p) => p.id === id)
+    return partner ? { serviceStartMinute: 540, serviceEndMinute: 1440, ...partner } : null
   }
 
   async create(input: NewGroupOrder): Promise<{ id: string; status: GroupOrderStatus }> {
@@ -209,6 +214,8 @@ export class InMemoryPartnerStore implements PartnerStore {
       address: input.address,
       city: input.city,
       commissionRate: input.commissionRate ?? 0.15, // le défaut du schéma Prisma
+      serviceStartMinute: input.serviceStartMinute ?? 540, // 9h00, défaut du schéma Prisma
+      serviceEndMinute: input.serviceEndMinute ?? 1440, // minuit
       active: true,
     }
     this.partners.push(partner)

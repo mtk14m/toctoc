@@ -14,7 +14,14 @@ export class PrismaGroupOrderStore implements GroupOrderStore {
   findPartner(id: string): Promise<PartnerSummary | null> {
     return this.db.partner.findUnique({
       where: { id },
-      select: { id: true, name: true, type: true, active: true },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        active: true,
+        serviceStartMinute: true,
+        serviceEndMinute: true,
+      },
     })
   }
 

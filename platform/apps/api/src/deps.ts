@@ -26,6 +26,8 @@ export interface AppDeps {
   partnerNotifier: PartnerNotifier
   rateLimiter: RateLimiter
   otpSender: OtpSender
+  /** L'horloge : les tests la fixent pour ne pas dépendre de l'heure à laquelle ils tournent. */
+  now?: (() => Date) | undefined
   /** Adaptateur Socket.io (Redis en production) ; sans lui, une seule instance de l'API diffuse. */
   socketAdapter?: ServerOptions['adapter'] | undefined
 }

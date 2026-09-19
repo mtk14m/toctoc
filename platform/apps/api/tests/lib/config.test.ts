@@ -119,6 +119,54 @@ describe('loadConfig', () => {
     })
   })
 
+  describe('horaires et règles de commande', () => {
+    it('ouvre de 9h à minuit, avec 20 minutes de commande et 45 minutes de livraison', () => {
+      expect(loadConfig({}).schedule).toEqual({
+        serviceStartMinute: 540,
+        serviceEndMinute: 1440,
+        orderWindowMinutes: 20,
+        deliveryLeadMinutes: 45,
+      })
+    })
+
+    it('se règle par variables d’environnement', () => {
+      const config = loadConfig({
+        SERVICE_START_HOUR: '10',
+        SERVICE_END_HOUR: '23',
+        ORDER_WINDOW_MINUTES: '30',
+        DELIVERY_LEAD_MINUTES: '60',
+      })
+
+      expect(config.schedule).toEqual({
+        serviceStartMinute: 600,
+        serviceEndMinute: 1380,
+        orderWindowMinutes: 30,
+        deliveryLeadMinutes: 60,
+      })
+    })
+
+    it.each([
+      ['SERVICE_START_HOUR', '24'],
+      ['SERVICE_END_HOUR', '0'],
+      ['ORDER_WINDOW_MINUTES', '0'],
+      ['ORDER_WINDOW_MINUTES', '500'],
+      ['DELIVERY_LEAD_MINUTES', '-5'],
+    ])('refuse %s=%s', (name, value) => {
+      expect(() => loadConfig({ [name]: value })).toThrow(new RegExp(name))
+    })
+
+    it('refuse un service qui finit avant de commencer', () => {
+      expect(() => loadConfig({ SERVICE_START_HOUR: '20', SERVICE_END_HOUR: '9' })).toThrow(
+        /SERVICE_END_HOUR/,
+      )
+    })
+
+    it('garde le mode « j’invite tout le monde » désactivé tant que la charge unique n’existe pas', () => {
+      expect(loadConfig({}).hostPaysEnabled).toBe(false)
+      expect(loadConfig({ ENABLE_HOST_PAYS: 'true' }).hostPaysEnabled).toBe(true)
+    })
+  })
+
   describe('TRUST_PROXY', () => {
     it('est désactivé par défaut : sans proxy, X-Forwarded-For serait falsifiable', () => {
       expect(loadConfig({}).trustProxy).toBe(false)

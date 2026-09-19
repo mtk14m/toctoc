@@ -107,6 +107,36 @@ describe('routes partenaires et menu', () => {
       expect(res.json().data.partner.commissionRate).toBe(0.145)
     })
 
+    it('sert de 9h à minuit par défaut', async () => {
+      const res = await post('/admin/partners', validPartner(), adminToken)
+
+      expect(res.json().data.partner).toMatchObject({ serviceStart: '09:00', serviceEnd: '24:00' })
+    })
+
+    it('accepte des heures de service réduites (une cuisinière qui ne fait que le déjeuner)', async () => {
+      const res = await post(
+        '/admin/partners',
+        { ...validPartner(), serviceStart: '11:00', serviceEnd: '15:00' },
+        adminToken,
+      )
+
+      expect(res.statusCode).toBe(201)
+      expect(res.json().data.partner).toMatchObject({ serviceStart: '11:00', serviceEnd: '15:00' })
+    })
+
+    it.each([
+      ['un format qui n’est pas HH:mm', { serviceStart: '9h' }],
+      ['une heure qui n’existe pas', { serviceEnd: '25:00' }],
+      ['un début égal à la fin', { serviceStart: '12:00', serviceEnd: '12:00' }],
+      ['un début après la fin', { serviceStart: '15:00', serviceEnd: '11:00' }],
+      ['une fin avant le début par défaut (9h)', { serviceEnd: '08:00' }],
+    ])('refuse %s (400 VALIDATION_ERROR)', async (_label, hours) => {
+      const res = await post('/admin/partners', { ...validPartner(), ...hours }, adminToken)
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error.code).toBe('VALIDATION_ERROR')
+    })
+
     it.each([
       ['un nom vide', { name: '  ' }],
       ['un type inconnu', { type: 'FOODTRUCK' }],

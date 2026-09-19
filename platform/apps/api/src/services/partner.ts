@@ -10,6 +10,9 @@ export interface NewPartner {
   city: string
   /** Sans valeur, la base applique le défaut du schéma (15 %). */
   commissionRate?: number | undefined
+  /** Heures de service en minutes depuis minuit ; sans valeur, 9h - minuit (défaut du schéma). */
+  serviceStartMinute?: number | undefined
+  serviceEndMinute?: number | undefined
 }
 
 export interface PartnerRecord {
@@ -20,6 +23,8 @@ export interface PartnerRecord {
   address: string
   city: string
   commissionRate: number
+  serviceStartMinute: number
+  serviceEndMinute: number
   active: boolean
 }
 

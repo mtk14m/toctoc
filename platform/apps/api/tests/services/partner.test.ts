@@ -33,6 +33,18 @@ describe('PartnerService', () => {
       })
     })
 
+    it('sert de 9h à minuit par défaut, et enregistre des heures réduites en minutes', async () => {
+      const usual = await service.createPartner(validPartner())
+      const lunchOnly = await service.createPartner({
+        ...validPartner(),
+        serviceStartMinute: 660,
+        serviceEndMinute: 900,
+      })
+
+      expect(usual).toMatchObject({ serviceStartMinute: 540, serviceEndMinute: 1440 })
+      expect(lunchOnly).toMatchObject({ serviceStartMinute: 660, serviceEndMinute: 900 })
+    })
+
     it('enregistre le taux de commission négocié', async () => {
       const partner = await service.createPartner({ ...validPartner(), commissionRate: 0.12 })
 
