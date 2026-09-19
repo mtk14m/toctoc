@@ -22,7 +22,7 @@ Statut : **développement de l'API en cours** (code dans [`../platform`](../plat
 | Décision | Choix | Révisable ? |
 |---|---|---|
 | Marché de lancement | Guinée (Conakry) | Non — c'est le seul marché sans acteur international déjà installé |
-| Occasion de lancement | Déjeuner de bureau — individus et petits groupes de collègues, chacun commande et paie pour lui-même | Oui, après Phase 0 (validation) |
+| Occasion de lancement | Repas de bureau, de 9h à minuit — le déjeuner, mais aussi les équipes qui travaillent tard ; commande ouverte 20 minutes puis livrée ; individus et petits groupes de collègues, chacun commande et paie pour lui-même | Oui, après Phase 0 (validation) |
 | Fonctionnalité de lancement | Une seule feature : lien de commande groupée avec effet waouh (liste en direct, choix rapide, paiement individuel) — voir [06-fonctionnalite-lancement.md](06-fonctionnalite-lancement.md) | Le principe non, l'implémentation oui |
 | Stack technique | Monolithe modulaire Node.js + Fastify + PostgreSQL/Prisma + Redis/BullMQ + Socket.io, patterns repris de `citimoov-v2` (pas Go, pas de microservices) — voir [07-architecture-mvp.md](07-architecture-mvp.md) | Oui, si le volume ou l'équipe grandissent |
 | Segment grand public | Reporté à la Phase 3, une fois la flotte et l'offre construites | Oui |
