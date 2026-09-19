@@ -69,6 +69,7 @@ erDiagram
         string deliveryAddress
         datetime orderCutoffTime
         datetime deliveryTime
+        PaymentMode paymentMode
         GroupOrderStatus status
         datetime createdAt
     }
@@ -183,6 +184,11 @@ enum PaymentProvider {
   CASH  // jamais utilisé par Payment en Phase 1 (voir plus bas) — gardé pour Payout, TocToc peut verser un livreur ou un relais en espèces localement
 }
 
+enum PaymentMode {
+  SPLIT      // chacun paie sa propre part — le défaut
+  HOST_PAYS  // le créateur du lien paie pour tout le groupe en une fois, à l'heure limite — voir 09-workflows.md
+}
+
 enum PaymentStatus {
   PENDING
   CONFIRMED
@@ -287,6 +293,7 @@ model GroupOrder {
   deliveryLng     Float?
   orderCutoffTime DateTime
   deliveryTime    DateTime
+  paymentMode     PaymentMode       @default(SPLIT) // figé à la création, voir 09-workflows.md — SPLIT (chacun paie sa part) ou HOST_PAYS (le créateur paie pour tout le groupe)
   status          GroupOrderStatus  @default(OPEN)
   createdAt       DateTime          @default(now())
   orderItems      OrderItem[]
@@ -439,7 +446,8 @@ model AuditLog {
 - **`deliveryFee` copié sur `OrderItem`, comme `unitPrice`** : au moment où une commande est créée, le backend compte le nombre d'`OrderItem` déjà existants (statut différent de `CANCELLED`) sur ce `GroupOrder`, en déduit le palier applicable (voir [04-modele-economique.md](04-modele-economique.md)), et fige le montant. Si une commande est annulée ensuite, les paliers déjà attribués aux autres ne bougent pas rétroactivement — seul compte le rang au moment de la commande, jamais recalculé après coup.
 - **`Payment.amount` = `(OrderItem.unitPrice × OrderItem.quantity) + OrderItem.deliveryFee`** : le paiement couvre le plat et la part de livraison de cette personne en une seule transaction mobile money, pas deux paiements séparés.
 - **`Payment.currency`** : figé par transaction, pas déduit dynamiquement — la Guinée (GNF) et les trois autres pays cibles (XOF) ne partagent pas la même devise ; sans ce champ, toute agrégation financière multi-pays en Phase 2 serait fausse silencieusement.
-- **`OrderItemStatus.CONFIRMED` (renommé depuis `PAID`) veut dire "argent réellement encaissé", sans exception, depuis que le cash n'est plus accepté côté client** — `Payment` passe `PENDING` → `CONFIRMED` via le webhook de l'opérateur mobile money, et `OrderItem` ne passe à `CONFIRMED` qu'*après* cette confirmation, jamais avant. **C'est une règle sans exception, volontairement** : si une personne ne paie pas alors que ses collègues sur le même lien paient, son `OrderItem` reste `PENDING_PAYMENT` (ou passe `CANCELLED` si le paiement échoue) — elle n'apparaît jamais dans le récapitulatif envoyé au partenaire, et ne reçoit donc pas de repas. La distinction "engagement vs encaissement" qui existait pour le cash (gardée dans l'historique de ce document) n'a plus lieu d'être : un seul chemin, un seul sens à `CONFIRMED`.
+- **`OrderItemStatus.CONFIRMED` (renommé depuis `PAID`) veut dire "argent réellement encaissé", sans exception, depuis que le cash n'est plus accepté côté client** — `Payment` passe `PENDING` → `CONFIRMED` via le webhook de l'opérateur mobile money, et `OrderItem` ne passe à `CONFIRMED` qu'*après* cette confirmation, jamais avant. **C'est une règle sans exception, volontairement** : si une personne ne paie pas alors que ses collègues sur le même lien paient, son `OrderItem` reste `PENDING_PAYMENT` (ou passe `CANCELLED` si le paiement échoue) — elle n'apparaît jamais dans le récapitulatif envoyé au partenaire, et ne reçoit donc pas de repas. La distinction "engagement vs encaissement" qui existait pour le cash (gardée dans l'historique de ce document) n'a plus lieu d'être : un seul chemin, un seul sens à `CONFIRMED`. **`GroupOrder.paymentMode = HOST_PAYS` ne rouvre pas cette règle** — voir la note dédiée ci-dessous.
+- **`GroupOrder.paymentMode`, deux façons de payer, sans jamais mentir sur ce qui est réellement encaissé** : en `SPLIT` (le défaut), le mécanisme est celui décrit juste au-dessus. En `HOST_PAYS`, le créateur du lien paie pour tout le groupe en une seule transaction mobile money, déclenchée à l'heure limite une fois le total connu (même job que la clôture, `groupOrderClosingWorker`, voir [09-workflows.md](09-workflows.md)) — pas de raison de faire payer chaque participant puis rembourser tout le monde. Le point délicat : entre le moment où un collègue choisit son plat et l'heure limite, son `OrderItem` reste `PENDING_PAYMENT` (aucune violation de la règle ci-dessus), mais il apparaît quand même sur la liste en direct, marqué explicitement "en attente du règlement de [créateur]" plutôt que confondu avec un `OrderItem` réellement payé. Ce n'est qu'une fois la charge unique du créateur confirmée que tous ces `OrderItem` basculent ensemble à `CONFIRMED`, chacun gardant son propre `Payment` (donc son propre `unitPrice`/`deliveryFee`/`commissionAmount` pour la compta), mais tous avec le **même** `providerTransactionId` — une seule transaction réelle, plusieurs lignes `Payment` qui la référencent. Si cette charge unique échoue, tous les `OrderItem` du lien passent `CANCELLED` ensemble — un risque de concentration assumé et documenté dans [05-risques.md](05-risques.md), pas une faille silencieuse.
 - **`Partner.commissionRate` par partenaire, pas une constante globale** : deux partenaires peuvent négocier des taux différents (une cuisinière à faible marge peut avoir besoin d'un taux plus bas qu'un restaurant établi) sans toucher au code. `OrderItem.commissionAmount` copie ce taux appliqué à `unitPrice × quantity` au moment de la commande — comme `unitPrice`, il ne bouge plus si `Partner.commissionRate` change ensuite pour de futures commandes.
 - **`Payout` est le pendant sortant de `Payment`** : `Payment` capte ce qu'un client verse à TocToc (via un opérateur mobile money agréé, jamais un solde interne — voir le risque réglementaire dans [05-risques.md](05-risques.md)) ; `Payout` capte ce que TocToc reverse ensuite à un partenaire, un livreur ou un relais, avec la même rigueur (fournisseur, référence de transaction, statut, devise). Sans cette table, il n'existe aucune trace de "combien doit-on à Aïcha cette semaine, et l'a-t-on payée" — un vrai trou de conformité, pas seulement un détail opérationnel. Agrégé par période (`periodStart`/`periodEnd`) plutôt que ligne par ligne : le détail se recalcule à la demande depuis `OrderItem` (pour un partenaire ou un relais) ou `Delivery` (pour un livreur) sur cette période.
 - **`Document` et `AuditLog` sont volontairement génériques** : un seul modèle de document pour tous les types de justificatifs (pièce d'identité, permis, registre de commerce...) plutôt qu'un champ par type sur `Partner`/`Driver` — ajouter un nouveau type de document plus tard (ex. une assurance livreur) ne demande qu'une valeur d'enum, pas une migration de schéma. Même logique pour `AuditLog` : une seule table pour tracer toute action `ADMIN_PLATFORM` sensible (vérification de document, remboursement manuel, assignation de livreur), avec `targetType`/`targetId` génériques plutôt qu'une table de log par entité — repris du pattern `AdminAuditLog` déjà utilisé dans CityMoov.

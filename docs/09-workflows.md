@@ -4,6 +4,10 @@ Quatre workflows, alignés sur le schéma de [08-schema-donnees.md](08-schema-do
 
 ## 1. Achat — créer, rejoindre, choisir, payer
 
+À la création du lien, le relais choisit le `paymentMode` ([08-schema-donnees.md](08-schema-donnees.md)) : `SPLIT` (chacun paie sa part, décrit ci-dessous) ou `HOST_PAYS` (le créateur paie pour tout le groupe, décrit dans la variante plus bas). C'est exactement ce que proposent déjà DoorDash et Uber Eats sur leurs commandes groupées ("Guests pay for themselves" vs. le créateur qui règle l'ensemble — voir [10-benchmark-produit-mondial.md](10-benchmark-produit-mondial.md)) : un patron qui veut offrir le déjeuner à son équipe, ou un collègue qui veut inviter les autres, peut le faire dès la création du lien, sans que ça change quoi que ce soit pour les autres modules du produit (menu, tarif dégressif, livraison, code de confirmation, notation).
+
+### Mode SPLIT (par défaut) — chacun paie sa part
+
 ```mermaid
 sequenceDiagram
     participant Relais as Relais (créateur)
@@ -12,7 +16,7 @@ sequenceDiagram
     participant WS as Socket.io (room groupOrder:id)
     participant MM as Mobile Money
 
-    Relais->>API: POST /group-orders (partnerId, adresse, heure limite, heure livraison)
+    Relais->>API: POST /group-orders (partnerId, adresse, heure limite, heure livraison, paymentMode)
     API-->>Relais: { shareToken } → lien toctoc.app/g/{shareToken}
     Relais->>Collegue: partage le lien (WhatsApp)
 
@@ -42,9 +46,45 @@ sequenceDiagram
 
 **Le palier de livraison est déterminé une fois, à la création de l'`OrderItem`, jamais recalculé ensuite** : le rang se lit en comptant les `OrderItem` déjà existants sur ce `GroupOrder` (hors `CANCELLED`) au moment précis de la requête. Deux commandes envoyées au même instant doivent être sérialisées (transaction avec verrou, ou contrainte au niveau de la base) pour éviter que deux participants se voient attribuer le même rang.
 
+### Variante : `paymentMode = HOST_PAYS` — le créateur paie pour tout le groupe
+
+```mermaid
+sequenceDiagram
+    participant Collegue as Collègue (participant)
+    participant API as Backend Fastify
+    participant WS as Socket.io (room groupOrder:id)
+    participant Job as groupOrderClosingWorker
+    participant MM as Mobile Money
+    participant Relais as Relais (créateur, paie pour tous)
+
+    Collegue->>API: POST /group-orders/{shareToken}/items (menuItemId)
+    API-->>API: transaction : détermine le palier → fige deliveryFee → crée OrderItem (status=PENDING_PAYMENT)
+    Note over API: aucune tentative de paiement individuelle — HOST_PAYS
+    API->>WS: emit groupOrder:item_pending { name, plat }
+    WS-->>Collegue: liste mise à jour en direct, marquée "en attente du règlement de [Relais]"
+
+    Note over Job: à l'heure limite + fenêtre de grâce (identique au mode SPLIT)
+    Job->>API: calcule le total (somme des OrderItem PENDING_PAYMENT non annulés)
+    API->>MM: initie UNE charge mobile money vers le créateur, pour le total
+    alt Charge confirmée
+        MM-->>API: webhook de confirmation
+        API-->>API: tous les OrderItem du lien → CONFIRMED (Payment créés, même providerTransactionId)
+        API->>WS: emit groupOrder:all_confirmed
+        WS-->>Collegue: la liste passe de "en attente" à confirmée, d'un coup
+    else Charge échouée
+        API-->>API: tous les OrderItem du lien → CANCELLED
+        API->>Relais: notification urgente — réessayer avant l'heure limite + fenêtre de grâce
+        API-->>Collegue: "le paiement du créateur a échoué, personne ne reçoit de commande sur ce lien aujourd'hui"
+    end
+```
+
+**Ce que ce mode ne change pas** : le tarif dégressif par palier ([04-modele-economique.md](04-modele-economique.md)) s'applique toujours à chaque `OrderItem`, exactement comme en `SPLIT` — c'est juste le créateur qui règle la somme de tous les tarifs individuels en une fois, pas chaque participant. Le menu, le code de confirmation de livraison, la notation : rien ne change en aval de l'achat.
+
+**Ce que ce mode change vraiment — un risque de concentration assumé** : en `SPLIT`, un paiement qui échoue n'affecte que la personne concernée. En `HOST_PAYS`, un seul paiement représente tout le groupe — s'il échoue, tout le monde perd sa commande d'un coup. C'est un compromis conscient, pas un oubli : voir la parade dans [05-risques.md](05-risques.md).
+
 **Rappel avant l'heure limite** : un job planifié (voir `reminderWorker`, même famille que `scheduledTripsWorker`) scanne les `GroupOrder` en statut `OPEN` dont `orderCutoffTime` approche, et envoie un rappel — par WhatsApp souhaité en priorité, SMS en secours. Voir la correction dans [07-architecture-mvp.md](07-architecture-mvp.md) : l'envoi WhatsApp n'est pas un pattern déjà prêt chez CityMoov, il reste à construire.
 
-**Clôture automatique, avec une fenêtre de grâce pour les paiements en cours** : un second job (`groupOrderClosingWorker`) scanne les `GroupOrder` dont `orderCutoffTime` est dépassée. Un paiement mobile money initié juste avant l'heure limite peut être confirmé par le webhook juste après — sans précaution, ce participant paierait pour une commande dont le partenaire n'a jamais entendu parler. Règle retenue : le job attend une **fenêtre de grâce de 2 minutes** après `orderCutoffTime` avant de figer le récapitulatif ; toute commande encore `PENDING_PAYMENT` passé ce délai est annulée automatiquement (remboursement si le débit a quand même eu lieu), et la personne est invitée à rejoindre le lien du lendemain. Une fois la fenêtre passée, le `GroupOrder` passe à `CLOSED` et déclenche le workflow de réception ci-dessous. **Si aucun `OrderItem` n'est `CONFIRMED`** (personne n'a payé), le `GroupOrder` passe directement à `CANCELLED` sans notifier le partenaire ni créer de `Delivery`.
+**Clôture automatique, avec une fenêtre de grâce pour les paiements en cours** : un second job (`groupOrderClosingWorker`) scanne les `GroupOrder` dont `orderCutoffTime` est dépassée, pour les deux modes de paiement. En `SPLIT`, un paiement mobile money initié juste avant l'heure limite peut être confirmé par le webhook juste après — sans précaution, ce participant paierait pour une commande dont le partenaire n'a jamais entendu parler. En `HOST_PAYS`, c'est le même job qui déclenche la charge unique au créateur, décrite plus haut. Règle retenue dans les deux cas : le job attend une **fenêtre de grâce de 2 minutes** après `orderCutoffTime` avant de figer le récapitulatif ; toute commande encore `PENDING_PAYMENT` passé ce délai est annulée automatiquement (remboursement si le débit a quand même eu lieu en `SPLIT`), et la personne est invitée à rejoindre le lien du lendemain. Une fois la fenêtre passée, le `GroupOrder` passe à `CLOSED` et déclenche le workflow de réception ci-dessous. **Si aucun `OrderItem` n'est `CONFIRMED`** (personne n'a payé en `SPLIT`, ou la charge du créateur a échoué en `HOST_PAYS`), le `GroupOrder` passe directement à `CANCELLED` sans notifier le partenaire ni créer de `Delivery`.
 
 ## 2. Réception de la commande — côté partenaire
 

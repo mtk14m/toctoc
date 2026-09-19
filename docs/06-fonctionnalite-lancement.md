@@ -1,6 +1,6 @@
 # La fonctionnalité de lancement — le lien de commande groupée
 
-Décision actée : TocToc ne démarre pas avec une application de livraison complète. Il démarre avec **une seule fonctionnalité** : un lien à partager entre collègues, où chacun choisit son plat et paie sa propre part. Tout le reste (catalogue étendu, comptes élaborés, avantage-repas) vient après, une fois que cette fonctionnalité a fait ses preuves — voir [03-roadmap-phases.md](03-roadmap-phases.md).
+Décision actée : TocToc ne démarre pas avec une application de livraison complète. Il démarre avec **une seule fonctionnalité** : un lien à partager entre collègues, où chacun choisit son plat, et paie sa propre part — ou se le fait offrir par celui qui a créé le lien. Tout le reste (catalogue étendu, comptes élaborés, avantage-repas) vient après, une fois que cette fonctionnalité a fait ses preuves — voir [03-roadmap-phases.md](03-roadmap-phases.md).
 
 Cette fonctionnalité doit être conçue pour produire un **effet waouh** — pas seulement fonctionner, mais surprendre agréablement et donner envie d'en parler. C'est ce qui transforme une commande groupée ordinaire en mécanique virale bottom-up (voir l'insight de [00-vision.md](00-vision.md)) : sans le waouh, ce n'est qu'un panier partagé de plus, copiable en un sprint par n'importe quel concurrent.
 
@@ -10,19 +10,23 @@ Cette fonctionnalité doit être conçue pour produire un **effet waouh** — pa
 
 Quelqu'un (souvent le même "relais" chaque jour dans un bureau donné) ouvre TocToc, choisit l'adresse de livraison (son bureau), une heure de livraison, et génère un lien unique. Il le partage dans le groupe WhatsApp de ses collègues — pas de nouvelle app à faire installer à ce stade pour les autres participants.
 
-**Exigence produit** : créer un lien doit prendre moins de 15 secondes. Si c'est plus long, personne ne le refait le lendemain.
+**Un choix à faire à la création, pas après** : qui paie ? Par défaut, chacun règle sa propre part (`SPLIT`). Mais si un patron veut offrir le déjeuner à son équipe, ou qu'un collègue veut inviter les autres, il peut choisir "je paie pour tout le monde" (`HOST_PAYS`) dès la création du lien — exactement ce que proposent déjà DoorDash et Uber Eats sur leurs commandes groupées ([10-benchmark-produit-mondial.md](10-benchmark-produit-mondial.md)). Ce choix ne se change pas en cours de route : les participants doivent savoir dès qu'ils rejoignent s'ils vont payer ou non.
+
+**Exigence produit** : créer un lien doit prendre moins de 15 secondes, choix du mode de paiement inclus — un simple interrupteur "chacun paie / j'invite tout le monde", pas un formulaire. Si c'est plus long, personne ne le refait le lendemain.
 
 ### 2. Rejoindre et choisir — le moment waouh n°1
 
 Chaque collègue clique le lien depuis son téléphone. Il atterrit directement sur une page web légère, sans compte à créer ni app à télécharger, qui affiche :
 - Un menu du jour volontairement restreint (peu de choix = décision rapide, pas de paralysie).
-- **La liste des collègues qui ont déjà rejoint et ce qu'ils ont choisi, mise à jour en direct.** C'est le cœur de l'effet waouh : voir "Aïcha — riz gras", "Mamadou — attiéké poisson" s'afficher en temps réel donne un sentiment d'événement collectif, pas une simple commande solitaire. C'est ce qui pousse la 5ᵉ, 8ᵉ, 10ᵉ personne à rejoindre par entraînement social, sans que personne n'ait eu à les convaincre individuellement. **Seules les commandes payées apparaissent sur cette liste** — pas de ligne "en attente" qui laisserait croire au groupe que quelqu'un est dedans alors que son paiement n'est pas passé.
+- **La liste des collègues qui ont déjà rejoint et ce qu'ils ont choisi, mise à jour en direct.** C'est le cœur de l'effet waouh : voir "Aïcha — riz gras", "Mamadou — attiéké poisson" s'afficher en temps réel donne un sentiment d'événement collectif, pas une simple commande solitaire. C'est ce qui pousse la 5ᵉ, 8ᵉ, 10ᵉ personne à rejoindre par entraînement social, sans que personne n'ait eu à les convaincre individuellement. **En mode `SPLIT`, seules les commandes payées apparaissent sur cette liste** — pas de ligne "en attente" qui laisserait croire au groupe que quelqu'un est dedans alors que son paiement n'est pas passé. **En mode `HOST_PAYS`, tout le monde apparaît "en attente" ensemble** jusqu'à la charge unique du créateur à l'heure limite ([09-workflows.md](09-workflows.md)) — ce n'est pas la même ambiguïté, puisque personne n'est faussement en avance sur les autres : le groupe entier est dans le même état, transparent, jusqu'au règlement final.
 
 **Exigence produit** : le temps entre "cliquer le lien" et "avoir choisi son plat" doit être minimal — quelques secondes. C'est le principal levier de viralité, il ne doit jamais être sacrifié pour ajouter une fonctionnalité annexe.
 
-### 3. Payer — indépendamment des autres, sans double authentification
+### 3. Payer — indépendamment des autres, sans double authentification (ou pas payer du tout, si on est invité)
 
-Chacun paie sa propre part en mobile money au moment où il choisit, sans dépendre de la validation ou du paiement des autres participants (voir le risque identifié dans [05-risques.md](05-risques.md)). Personne n'attend qu'un tiers valide ou avance l'argent.
+En mode `SPLIT` (le défaut), chacun paie sa propre part en mobile money au moment où il choisit, sans dépendre de la validation ou du paiement des autres participants (voir le risque identifié dans [05-risques.md](05-risques.md)). Personne n'attend qu'un tiers valide ou avance l'argent.
+
+En mode `HOST_PAYS`, choisir son plat suffit — **aucune étape de paiement pour le participant**, encore plus rapide que le mode par défaut. Le créateur du lien règle la totalité en une seule fois à l'heure limite ([09-workflows.md](09-workflows.md)). Une bonne nouvelle mérite d'être dite simplement : la page affiche clairement "Offert par [nom du créateur]" pour que personne ne se demande s'il doit sortir son téléphone pour payer.
 
 **Point de vigilance sur la vitesse réelle** : l'exigence "quelques secondes" du parcours n'a de sens que si on ne rajoute pas de friction inutile. Un participant qui rejoint un lien une fois n'a pas besoin d'un code OTP TocToc en plus de la confirmation déjà demandée par son opérateur mobile money (USSD, code PIN) — lui demander les deux, c'est doubler la friction pour une sécurité qui ne protège pas grand-chose sur une commande à faible montant. L'OTP par téléphone (voir [08-schema-donnees.md](08-schema-donnees.md)) garde du sens pour le **relais**, qui revient chaque jour et a un intérêt à protéger son compte — pas pour un participant occasionnel qui ne fait que choisir et payer.
 
