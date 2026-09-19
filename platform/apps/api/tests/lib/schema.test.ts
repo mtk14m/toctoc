@@ -116,6 +116,14 @@ describe('schéma Prisma', () => {
     expect(getField('OtpCode', 'attempts').type).toBe('Int')
   })
 
+  it('le client généré importe en .js, sinon `node dist/server.js` plante en production', () => {
+    // Sans cette option, le client généré contient `from "./internal/class.ts"` : tsx et Vitest
+    // s'en accommodent, mais tsc le recopie tel quel dans dist/ où seuls des .js existent.
+    const generator = schemaSource.match(/^generator client \{([\s\S]*?)^\}/m)?.[1] ?? ''
+
+    expect(generator).toMatch(/importFileExtension\s*=\s*"js"/)
+  })
+
   it('User.phone est unique', () => {
     expect(getField('User', 'phone').attributes).toContain('@unique')
   })
