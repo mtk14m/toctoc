@@ -9,7 +9,9 @@ import { AppError } from '../lib/errors.js'
 import type { RateLimiter } from '../lib/rate-limiter.js'
 import { redisKeys } from '../lib/redis-keys.js'
 import { utcDay } from '../lib/utc-day.js'
+import type { Participant } from '../realtime/events.js'
 import type { UserStore } from './auth.js'
+import { deliveryFeeForRank } from './pricing.js'
 
 export const MAX_GROUP_ORDER_CREATIONS = 10
 export const GROUP_ORDER_CREATION_WINDOW_SECONDS = 60 * 60
@@ -187,12 +189,17 @@ export function createGroupOrderService(deps: GroupOrderServiceDeps) {
         creatorName: order.creatorName,
         partner: { name: order.partner.name, type: order.partner.type },
         menu,
-        participants: visible.map((item) => ({
+        participants: visible.map((item): Participant => ({
           name: item.participantName,
           dish: item.menuItemName,
           quantity: item.quantity,
           pending: item.status === 'PENDING_PAYMENT',
         })),
+        // Le rang d'un arrivant compte les commandes en cours, payées ou non (voir `join`) : c'est le
+        // tarif que verra le prochain participant, celui qui baisse à chaque palier (waouh n°2).
+        nextDeliveryFee: deliveryFeeForRank(
+          items.filter((item) => item.status !== 'CANCELLED').length + 1,
+        ),
       }
     },
   }
