@@ -6,12 +6,15 @@ import type { AppDeps } from './deps.js'
 import type { Config } from './lib/config.js'
 import { authenticate } from './plugins/authenticate.js'
 import { registerErrorHandling } from './plugins/error-handler.js'
+import { createRequireRole } from './plugins/require-role.js'
 import { authRoutes } from './routes/auth.js'
 import { groupOrderRoutes } from './routes/group-orders.js'
 import { healthRoutes } from './routes/health.js'
+import { adminPartnerRoutes, partnerRoutes } from './routes/partners.js'
 import { createAuthService } from './services/auth.js'
 import { createGroupOrderService } from './services/group-order.js'
 import { createOtpService } from './services/otp.js'
+import { createPartnerService } from './services/partner.js'
 
 function loggerOptions(config: Config) {
   switch (config.nodeEnv) {
@@ -41,6 +44,7 @@ export async function buildApp(config: Config, deps: AppDeps) {
   await app.register(cors, { origin: config.corsOrigins, credentials: true })
   await app.register(jwt, { secret: config.jwtSecret, sign: { expiresIn: '7d' } })
   app.decorate('authenticate', authenticate)
+  app.decorate('requireRole', createRequireRole(deps.userStore))
 
   const otp = createOtpService({
     store: deps.otpStore,
@@ -54,6 +58,10 @@ export async function buildApp(config: Config, deps: AppDeps) {
     users: deps.userStore,
     rateLimiter: deps.rateLimiter,
   })
+  const partners = createPartnerService({
+    store: deps.partnerStore,
+    defaultCountryCode: config.defaultCountryCode,
+  })
 
   await app.register(healthRoutes)
   await app.register(authRoutes, {
@@ -64,6 +72,8 @@ export async function buildApp(config: Config, deps: AppDeps) {
     defaultCountryCode: config.defaultCountryCode,
   })
   await app.register(groupOrderRoutes, { prefix: '/group-orders', groupOrders })
+  await app.register(partnerRoutes, { prefix: '/partners', partners })
+  await app.register(adminPartnerRoutes, { prefix: '/admin', partners })
 
   return app
 }

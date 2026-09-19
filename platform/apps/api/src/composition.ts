@@ -7,6 +7,7 @@ import { ConsoleOtpSender } from './services/otp-sender.js'
 import type { OtpSender } from './services/otp.js'
 import { PrismaGroupOrderStore } from './stores/prisma-group-order-store.js'
 import { PrismaOtpStore } from './stores/prisma-otp-store.js'
+import { PrismaPartnerStore } from './stores/prisma-partner-store.js'
 import { PrismaUserStore } from './stores/prisma-user-store.js'
 
 function createOtpSender(config: Config): OtpSender {
@@ -22,6 +23,7 @@ export function createProductionDeps(config: Config): AppDeps {
     otpStore: new PrismaOtpStore(prisma),
     userStore: new PrismaUserStore(prisma),
     groupOrderStore: new PrismaGroupOrderStore(prisma),
+    partnerStore: new PrismaPartnerStore(prisma),
     rateLimiter: new RedisRateLimiter(redis),
     otpSender: createOtpSender(config),
   }

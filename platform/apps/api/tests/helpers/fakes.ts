@@ -11,6 +11,14 @@ import type {
 } from '../../src/services/group-order.js'
 import type { GroupOrderStatus } from '../../src/generated/prisma/enums.js'
 import type { OtpRecord, OtpSender, OtpStore } from '../../src/services/otp.js'
+import type {
+  MenuItemRecord,
+  NewMenuItem,
+  NewPartner,
+  PartnerListItem,
+  PartnerRecord,
+  PartnerStore,
+} from '../../src/services/partner.js'
 
 interface StoredOtp extends OtpRecord {
   phone: string
@@ -152,6 +160,53 @@ export class InMemoryGroupOrderStore implements GroupOrderStore {
   }
 }
 
+export class InMemoryPartnerStore implements PartnerStore {
+  partners: PartnerRecord[] = []
+  menuItems: MenuItemRecord[] = []
+  private sequence = 0
+
+  async create(input: NewPartner): Promise<PartnerRecord> {
+    this.sequence += 1
+    const partner: PartnerRecord = {
+      id: `partner_${this.sequence}`,
+      name: input.name,
+      type: input.type,
+      phone: input.phone,
+      address: input.address,
+      city: input.city,
+      commissionRate: input.commissionRate ?? 0.15, // le défaut du schéma Prisma
+      active: true,
+    }
+    this.partners.push(partner)
+    return partner
+  }
+
+  async listActive(): Promise<PartnerListItem[]> {
+    return this.partners
+      .filter((p) => p.active)
+      .map(({ id, name, type, city }) => ({ id, name, type, city }))
+  }
+
+  async exists(id: string): Promise<boolean> {
+    return this.partners.some((p) => p.id === id)
+  }
+
+  async createMenuItem(input: NewMenuItem): Promise<MenuItemRecord> {
+    this.sequence += 1
+    const item: MenuItemRecord = {
+      id: `menu_${this.sequence}`,
+      partnerId: input.partnerId,
+      name: input.name,
+      description: input.description ?? null,
+      price: input.price,
+      photoUrl: input.photoUrl ?? null,
+      availableDate: input.availableDate,
+    }
+    this.menuItems.push(item)
+    return item
+  }
+}
+
 export class InMemoryRateLimiter implements RateLimiter {
   private counts = new Map<string, number>()
 
@@ -184,6 +239,7 @@ export function createTestDeps() {
     otpStore: new InMemoryOtpStore(),
     userStore,
     groupOrderStore: new InMemoryGroupOrderStore(userStore),
+    partnerStore: new InMemoryPartnerStore(),
     rateLimiter: new InMemoryRateLimiter(),
     otpSender: new RecordingOtpSender(),
   } satisfies AppDeps
