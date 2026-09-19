@@ -2,4 +2,6 @@
 export const redisKeys = {
   otpRequests: (phone: string) => `otp:requests:${phone}`,
   groupOrderCreations: (userId: string) => `group-order:creations:${userId}`,
+  joinsByPhone: (phone: string) => `join:phone:${phone}`,
+  joinsByIp: (ip: string) => `join:ip:${ip}`,
 } as const

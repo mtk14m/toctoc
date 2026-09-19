@@ -1,7 +1,8 @@
 import { z } from 'zod'
 
-// Secret utilisable uniquement hors production : en production, JWT_SECRET est obligatoire.
+// Secrets utilisables uniquement hors production : en production, ils sont obligatoires.
 const DEV_JWT_SECRET = 'dev-only-jwt-secret-do-not-use-in-production'
+const DEV_PAYMENT_WEBHOOK_SECRET = 'dev-only-payment-webhook-secret-do-not-use'
 
 const envSchema = z
   .object({
@@ -27,10 +28,21 @@ const envSchema = z
       .string()
       .regex(/^\d{1,3}$/, 'chiffres seulement, sans le +')
       .default('224'),
+    // À activer uniquement quand l'API n'est joignable que par le reverse proxy (Caddy) : Fastify
+    // lit alors l'IP du client dans X-Forwarded-For. Sans proxy, cet en-tête est falsifiable.
+    TRUST_PROXY: z.stringbool().default(false),
+    // Opérateur de mobile money. Seule la passerelle de développement existe pour l'instant (aucun
+    // paiement réel) ; chaque opérateur réel s'ajoutera ici avec son implémentation.
+    PAYMENT_PROVIDER: z.enum(['fake']).default('fake'),
+    // Secret de signature des webhooks de paiement : seul l'opérateur (et nous) le connaît.
+    PAYMENT_WEBHOOK_SECRET: z.string().min(32).optional(),
   })
   .superRefine((env, ctx) => {
-    if (env.NODE_ENV === 'production' && !env.JWT_SECRET) {
-      ctx.addIssue({ code: 'custom', path: ['JWT_SECRET'], message: 'obligatoire en production' })
+    if (env.NODE_ENV !== 'production') return
+    for (const name of ['JWT_SECRET', 'PAYMENT_WEBHOOK_SECRET'] as const) {
+      if (!env[name]) {
+        ctx.addIssue({ code: 'custom', path: [name], message: 'obligatoire en production' })
+      }
     }
   })
 
@@ -43,6 +55,9 @@ export interface Config {
   jwtSecret: string
   otpDelivery: 'console'
   defaultCountryCode: string
+  trustProxy: boolean
+  paymentProvider: 'fake'
+  paymentWebhookSecret: string
 }
 
 /**
@@ -70,5 +85,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     jwtSecret: parsed.data.JWT_SECRET ?? DEV_JWT_SECRET,
     otpDelivery: parsed.data.OTP_DELIVERY,
     defaultCountryCode: parsed.data.DEFAULT_COUNTRY_CODE,
+    trustProxy: parsed.data.TRUST_PROXY,
+    paymentProvider: parsed.data.PAYMENT_PROVIDER,
+    paymentWebhookSecret: parsed.data.PAYMENT_WEBHOOK_SECRET ?? DEV_PAYMENT_WEBHOOK_SECRET,
   }
 }

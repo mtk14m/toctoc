@@ -8,6 +8,7 @@ import type {
 import { AppError } from '../lib/errors.js'
 import type { RateLimiter } from '../lib/rate-limiter.js'
 import { redisKeys } from '../lib/redis-keys.js'
+import { utcDay } from '../lib/utc-day.js'
 import type { UserStore } from './auth.js'
 
 export const MAX_GROUP_ORDER_CREATIONS = 10
@@ -82,11 +83,6 @@ export interface CreateGroupOrderInput {
 /** 12 octets aléatoires → 16 caractères sûrs dans une URL. Le lien ne révèle aucun id interne. */
 export function generateShareToken(): string {
   return randomBytes(12).toString('base64url')
-}
-
-/** Minuit UTC du jour de `date`. La Guinée est en UTC toute l'année : pas de décalage à gérer. */
-function utcDay(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
 }
 
 export interface GroupOrderServiceDeps {

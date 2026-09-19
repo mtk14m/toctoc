@@ -15,6 +15,11 @@ export interface UserStore {
   findByPhone(phone: string): Promise<AuthUser | null>
   findById(id: string): Promise<AuthUser | null>
   create(input: { phone: string; name: string }): Promise<AuthUser>
+  /**
+   * Le compte de ce numéro, créé s'il n'existe pas. Atomique (deux appels simultanés ne créent
+   * qu'un compte) et sans effet sur le nom d'un compte existant.
+   */
+  findOrCreateByPhone(input: { phone: string; name: string }): Promise<AuthUser>
 }
 
 export function createAuthService(deps: { otp: OtpService; users: UserStore }) {

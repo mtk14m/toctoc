@@ -24,7 +24,7 @@ sequenceDiagram
     API-->>Collegue: menu du jour du partenaire + liste des participants déjà inscrits
     Collegue->>WS: rejoint la room groupOrder:{id}
 
-    Collegue->>API: POST /group-orders/{shareToken}/items (menuItemId, téléphone)
+    Collegue->>API: POST /group-orders/{shareToken}/items (menuItemId, quantité, téléphone, nom)
     API-->>API: transaction : compte les OrderItem non CANCELLED déjà sur ce lien → détermine le palier → fige deliveryFee
     API-->>API: crée OrderItem (status=PENDING_PAYMENT, deliveryFee figé)
     API->>MM: initier le paiement mobile money (unitPrice × quantité + deliveryFee)

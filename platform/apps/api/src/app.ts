@@ -10,11 +10,15 @@ import { createRequireRole } from './plugins/require-role.js'
 import { authRoutes } from './routes/auth.js'
 import { groupOrderRoutes } from './routes/group-orders.js'
 import { healthRoutes } from './routes/health.js'
+import { orderItemRoutes } from './routes/order-items.js'
 import { adminPartnerRoutes, partnerRoutes } from './routes/partners.js'
+import { webhookRoutes } from './routes/webhooks.js'
 import { createAuthService } from './services/auth.js'
 import { createGroupOrderService } from './services/group-order.js'
+import { createOrderItemService } from './services/order-item.js'
 import { createOtpService } from './services/otp.js'
 import { createPartnerService } from './services/partner.js'
+import { createPaymentService } from './services/payment.js'
 
 function loggerOptions(config: Config) {
   switch (config.nodeEnv) {
@@ -36,7 +40,7 @@ function loggerOptions(config: Config) {
  * Les dépendances externes arrivent par `deps` (voir deps.ts).
  */
 export async function buildApp(config: Config, deps: AppDeps) {
-  const app = Fastify({ logger: loggerOptions(config) })
+  const app = Fastify({ logger: loggerOptions(config), trustProxy: config.trustProxy })
 
   registerErrorHandling(app)
 
@@ -58,6 +62,17 @@ export async function buildApp(config: Config, deps: AppDeps) {
     users: deps.userStore,
     rateLimiter: deps.rateLimiter,
   })
+  const payments = createPaymentService({
+    store: deps.paymentStore,
+    gateway: deps.paymentGateway,
+  })
+  const orderItems = createOrderItemService({
+    store: deps.orderItemStore,
+    users: deps.userStore,
+    payments,
+    rateLimiter: deps.rateLimiter,
+    defaultCountryCode: config.defaultCountryCode,
+  })
   const partners = createPartnerService({
     store: deps.partnerStore,
     defaultCountryCode: config.defaultCountryCode,
@@ -72,8 +87,10 @@ export async function buildApp(config: Config, deps: AppDeps) {
     defaultCountryCode: config.defaultCountryCode,
   })
   await app.register(groupOrderRoutes, { prefix: '/group-orders', groupOrders })
+  await app.register(orderItemRoutes, { prefix: '/group-orders', orderItems })
   await app.register(partnerRoutes, { prefix: '/partners', partners })
   await app.register(adminPartnerRoutes, { prefix: '/admin', partners })
+  await app.register(webhookRoutes, { prefix: '/webhooks', payments })
 
   return app
 }

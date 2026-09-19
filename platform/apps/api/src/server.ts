@@ -21,6 +21,12 @@ if (config.nodeEnv === 'production' && config.otpDelivery === 'console') {
       'À réserver au pilote interne, jamais avec de vrais clients.',
   )
 }
+if (config.nodeEnv === 'production' && config.paymentProvider === 'fake') {
+  app.log.warn(
+    'PAYMENT_PROVIDER=fake en production : aucun paiement réel, quiconque connaît ' +
+      'PAYMENT_WEBHOOK_SECRET peut « payer ». À réserver au pilote interne.',
+  )
+}
 
 // Arrêt propre : on cesse d'accepter des requêtes, on laisse finir celles en cours, puis on ferme les connexions.
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
