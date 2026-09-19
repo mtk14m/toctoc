@@ -1,0 +1,389 @@
+import { beforeEach, describe, expect, it } from 'vitest'
+import { PAYMENT_GRACE_MS, createPaymentService } from '../../src/services/payment.js'
+import { createClosingService } from '../../src/services/closing.js'
+import { createOrderItemService } from '../../src/services/order-item.js'
+import {
+  InMemoryClosingStore,
+  InMemoryGroupOrderStore,
+  InMemoryOrderItemStore,
+  InMemoryPaymentStore,
+  InMemoryRateLimiter,
+  InMemoryUserStore,
+  RecordingPartnerNotifier,
+  RecordingPaymentGateway,
+  RecordingPublisher,
+} from '../helpers/fakes.js'
+
+const NOW = new Date('2026-09-21T08:00:00.000Z')
+const CUTOFF = new Date('2026-09-21T10:30:00.000Z')
+const DELIVERY = new Date('2026-09-21T12:00:00.000Z')
+
+describe('PaymentService', () => {
+  let users: InMemoryUserStore
+  let groups: InMemoryGroupOrderStore
+  let paymentStore: InMemoryPaymentStore
+  let gateway: RecordingPaymentGateway
+  let publisher: RecordingPublisher
+  let payments: ReturnType<typeof createPaymentService>
+  let orderItems: ReturnType<typeof createOrderItemService>
+  let current: Date
+
+  const join = (phone = '622000001', name = 'Aïcha') =>
+    orderItems.join('lien', { menuItemId: 'menu_riz', quantity: 1, phone, name }, '203.0.113.7')
+
+  const event = (overrides: Record<string, unknown> = {}) => ({
+    reference: paymentStore.payments[0]!.id,
+    providerTransactionId: 'tx_operateur_1',
+    amount: 31000,
+    status: 'CONFIRMED' as const,
+    ...overrides,
+  })
+
+  beforeEach(() => {
+    current = NOW
+    users = new InMemoryUserStore()
+    groups = new InMemoryGroupOrderStore(users)
+    paymentStore = new InMemoryPaymentStore(groups)
+    gateway = new RecordingPaymentGateway()
+    publisher = new RecordingPublisher()
+    payments = createPaymentService({
+      store: paymentStore,
+      gateway,
+      realtime: publisher,
+      now: () => current,
+    })
+    orderItems = createOrderItemService({
+      store: new InMemoryOrderItemStore(groups, users, paymentStore),
+      users,
+      payments,
+      realtime: publisher,
+      rateLimiter: new InMemoryRateLimiter(),
+      defaultCountryCode: '224',
+      now: () => current,
+    })
+
+    groups.partners.push({
+      id: 'partner_1',
+      name: 'Chez Aïssatou',
+      type: 'CUISINE_MAISON',
+      active: true,
+    })
+    groups.groupOrders.push({
+      id: 'group_1',
+      creatorId: 'user_relais',
+      partnerId: 'partner_1',
+      shareToken: 'lien',
+      deliveryAddress: 'Kaloum Center',
+      orderCutoffTime: CUTOFF,
+      deliveryTime: DELIVERY,
+      paymentMode: 'SPLIT',
+      status: 'OPEN',
+    })
+    groups.menuItems.push({
+      id: 'menu_riz',
+      partnerId: 'partner_1',
+      name: 'Riz gras',
+      description: null,
+      price: 25000,
+      photoUrl: null,
+      availableDate: new Date('2026-09-21'),
+      active: true,
+    })
+  })
+
+  describe('au moment de rejoindre (mode SPLIT)', () => {
+    it('crée un paiement en attente du montant exact et le lance chez l’opérateur', async () => {
+      const result = await join('622 00 00 01')
+
+      expect(result.payment).toEqual({ status: 'PENDING' })
+      expect(paymentStore.payments).toHaveLength(1)
+      expect(paymentStore.payments[0]).toMatchObject({
+        amount: 31000, // 25 000 + 6 000 de livraison, une seule transaction (docs/08)
+        status: 'PENDING',
+        providerTransactionId: null,
+      })
+      expect(gateway.initiated).toEqual([
+        {
+          reference: paymentStore.payments[0]!.id,
+          amount: 31000,
+          currency: 'GNF',
+          phone: '+224622000001',
+        },
+      ])
+    })
+
+    it('n’initie aucun paiement en HOST_PAYS : le créateur règle tout à l’heure limite', async () => {
+      groups.groupOrders[0]!.paymentMode = 'HOST_PAYS'
+
+      const result = await join()
+
+      expect(result.payment).toBeNull()
+      expect(paymentStore.payments).toHaveLength(0)
+      expect(gateway.initiated).toHaveLength(0)
+    })
+
+    it('annule la commande si l’opérateur est injoignable (502), le participant peut réessayer', async () => {
+      gateway.failWith = new Error('opérateur en panne')
+
+      await expect(join()).rejects.toMatchObject({ statusCode: 502, code: 'PAYMENT_UNAVAILABLE' })
+      expect(groups.orderItems[0]!.status).toBe('CANCELLED')
+      expect(paymentStore.payments[0]!.status).toBe('FAILED')
+
+      gateway.failWith = null
+      await expect(join()).resolves.toMatchObject({ status: 'PENDING_PAYMENT' })
+    })
+
+    it('garde l’erreur de l’opérateur en cause, pour les logs (jamais renvoyée au client)', async () => {
+      const boom = new Error('opérateur en panne')
+      gateway.failWith = boom
+
+      await expect(join()).rejects.toMatchObject({ cause: boom })
+    })
+  })
+
+  describe('handleEvent — paiement confirmé', () => {
+    beforeEach(async () => {
+      await join()
+    })
+
+    it('confirme le paiement puis la commande (« argent encaissé », docs/08)', async () => {
+      current = new Date('2026-09-21T09:00:00.000Z')
+
+      const outcome = await payments.handleEvent(event())
+
+      expect(outcome).toBe('confirmed')
+      expect(paymentStore.payments[0]).toMatchObject({
+        status: 'CONFIRMED',
+        providerTransactionId: 'tx_operateur_1',
+        paidAt: current,
+      })
+      expect(groups.orderItems[0]!.status).toBe('CONFIRMED')
+    })
+
+    it('est idempotent : un évènement rejoué (l’opérateur réessaie) ne change rien', async () => {
+      current = new Date('2026-09-21T09:00:00.000Z')
+      await payments.handleEvent(event())
+      current = new Date('2026-09-21T09:05:00.000Z')
+
+      const outcome = await payments.handleEvent(event())
+
+      expect(outcome).toBe('already_processed')
+      expect(paymentStore.payments[0]!.paidAt).toEqual(new Date('2026-09-21T09:00:00.000Z'))
+    })
+
+    it('accepte encore un paiement dans la fenêtre de grâce après l’heure limite', async () => {
+      current = new Date(CUTOFF.getTime() + PAYMENT_GRACE_MS - 1000)
+
+      expect(await payments.handleEvent(event())).toBe('confirmed')
+      expect(groups.orderItems[0]!.status).toBe('CONFIRMED')
+    })
+
+    it('refuse un montant différent de celui attendu (422 AMOUNT_MISMATCH), sans rien changer', async () => {
+      await expect(payments.handleEvent(event({ amount: 1000 }))).rejects.toMatchObject({
+        statusCode: 422,
+        code: 'AMOUNT_MISMATCH',
+      })
+      expect(paymentStore.payments[0]!.status).toBe('PENDING')
+      expect(groups.orderItems[0]!.status).toBe('PENDING_PAYMENT')
+    })
+
+    it('répond 404 PAYMENT_NOT_FOUND pour une référence inconnue', async () => {
+      await expect(payments.handleEvent(event({ reference: 'inconnue' }))).rejects.toMatchObject({
+        statusCode: 404,
+        code: 'PAYMENT_NOT_FOUND',
+      })
+    })
+  })
+
+  describe('handleEvent — paiement arrivé trop tard (docs/09 : fenêtre de grâce de 2 minutes)', () => {
+    beforeEach(async () => {
+      await join()
+    })
+
+    it('encaisse mais n’ajoute pas la commande au récap : elle est annulée, à rembourser', async () => {
+      current = new Date(CUTOFF.getTime() + PAYMENT_GRACE_MS)
+
+      const outcome = await payments.handleEvent(event())
+
+      expect(outcome).toBe('late')
+      expect(paymentStore.payments[0]!.status).toBe('CONFIRMED') // l'argent est bien parti
+      expect(groups.orderItems[0]!.status).toBe('CANCELLED') // mais pas de repas
+    })
+
+    it('traite de la même façon un paiement dont la commande a déjà été annulée', async () => {
+      groups.orderItems[0]!.status = 'CANCELLED'
+
+      expect(await payments.handleEvent(event())).toBe('late')
+      expect(paymentStore.payments[0]!.status).toBe('CONFIRMED')
+      expect(groups.orderItems[0]!.status).toBe('CANCELLED')
+    })
+
+    it('traite de la même façon un paiement sur un lien déjà clôturé', async () => {
+      groups.groupOrders[0]!.status = 'CLOSED'
+
+      expect(await payments.handleEvent(event())).toBe('late')
+      expect(groups.orderItems[0]!.status).toBe('CANCELLED')
+    })
+  })
+
+  describe('handleEvent — paiement échoué', () => {
+    beforeEach(async () => {
+      await join()
+    })
+
+    it('annule la commande de cette personne seulement, et libère son numéro', async () => {
+      await join('622000002', 'Mamadou')
+      const failedReference = paymentStore.payments[0]!.id
+
+      const outcome = await payments.handleEvent(
+        event({ reference: failedReference, status: 'FAILED' }),
+      )
+
+      expect(outcome).toBe('failed')
+      expect(paymentStore.payments[0]!.status).toBe('FAILED')
+      expect(groups.orderItems.map((i) => i.status)).toEqual(['CANCELLED', 'PENDING_PAYMENT'])
+      // elle peut réessayer, et son rang n'est pas perdu : la commande annulée ne compte plus
+      await expect(join()).resolves.toMatchObject({ status: 'PENDING_PAYMENT', deliveryFee: 6000 })
+    })
+
+    it('ignore un échec tardif pour un paiement déjà confirmé (l’argent est là)', async () => {
+      await payments.handleEvent(event())
+
+      const outcome = await payments.handleEvent(event({ status: 'FAILED' }))
+
+      expect(outcome).toBe('already_processed')
+      expect(paymentStore.payments[0]!.status).toBe('CONFIRMED')
+      expect(groups.orderItems[0]!.status).toBe('CONFIRMED')
+    })
+
+    it('est idempotent : un échec rejoué ne change rien', async () => {
+      await payments.handleEvent(event({ status: 'FAILED' }))
+
+      expect(await payments.handleEvent(event({ status: 'FAILED' }))).toBe('already_processed')
+    })
+  })
+
+  describe('après la clôture du lien', () => {
+    it('un débit qui arrive après la clôture est encaissé, la commande reste annulée : « late »', async () => {
+      await join()
+      current = new Date(CUTOFF.getTime() + PAYMENT_GRACE_MS)
+      await createClosingService({
+        store: new InMemoryClosingStore(groups),
+        notifier: new RecordingPartnerNotifier(),
+        realtime: publisher,
+        now: () => current,
+      }).closeDue()
+      publisher.published.length = 0
+
+      const outcome = await payments.handleEvent(event())
+
+      expect(outcome).toBe('late')
+      expect(paymentStore.payments[0]!.status).toBe('CONFIRMED') // l'argent est bien parti
+      expect(groups.orderItems[0]!.status).toBe('CANCELLED') // pas de repas : à rembourser
+      expect(publisher.published.map((p) => p.event)).toEqual(['orderItem:updated'])
+    })
+
+    it('un lien clôturé entre la décision et l’écriture ne fait pas confirmer la commande', async () => {
+      await join()
+      // La clôture s'exécute juste après que le service ait lu le paiement et jugé qu'il était dans les temps.
+      const readPayment = paymentStore.findById.bind(paymentStore)
+      paymentStore.findById = async (id) => {
+        const record = await readPayment(id)
+        groups.groupOrders[0]!.status = 'CLOSED'
+        return record
+      }
+
+      const outcome = await payments.handleEvent(event())
+
+      expect(outcome).toBe('late')
+      expect(groups.orderItems[0]!.status).toBe('CANCELLED')
+      expect(publisher.published.map((p) => p.event)).toEqual(['orderItem:updated'])
+    })
+  })
+
+  describe('évènements temps réel', () => {
+    const groupRoom = 'groupOrder:group_1'
+
+    it('rejoindre en SPLIT n’annonce rien au groupe : la personne n’a pas encore payé', async () => {
+      await join('622000001', 'Aïcha')
+
+      expect(publisher.published).toEqual([])
+    })
+
+    it('un paiement confirmé fait apparaître la personne chez tous ceux qui ont ouvert le lien', async () => {
+      await join('622000001', 'Aïcha')
+      await join('622000002', 'Mamadou')
+
+      await payments.handleEvent(event())
+
+      expect(publisher.published).toContainEqual({
+        room: groupRoom,
+        event: 'groupOrder:item_added',
+        payload: {
+          participant: { name: 'Aïcha', dish: 'Riz gras', quantity: 1, pending: false },
+          // 2 commandes actives : le prochain arrivant sera le 3ᵉ (deuxième palier)
+          nextDeliveryFee: 5000,
+        },
+      })
+    })
+
+    it('prévient en privé la personne concernée, dans une room qui n’est que la sienne', async () => {
+      await join()
+
+      await payments.handleEvent(event())
+
+      expect(publisher.published).toContainEqual({
+        room: 'orderItem:item_1',
+        event: 'orderItem:updated',
+        payload: { orderItemId: 'item_1', status: 'CONFIRMED', reason: 'PAYMENT_CONFIRMED' },
+      })
+    })
+
+    it('un échec ne prévient que la personne concernée, jamais le groupe', async () => {
+      await join()
+
+      await payments.handleEvent(event({ status: 'FAILED' }))
+
+      expect(publisher.published).toEqual([
+        {
+          room: 'orderItem:item_1',
+          event: 'orderItem:updated',
+          payload: { orderItemId: 'item_1', status: 'CANCELLED', reason: 'PAYMENT_FAILED' },
+        },
+      ])
+    })
+
+    it('un paiement trop tard prévient la personne (pas de repas) sans rien annoncer au groupe', async () => {
+      await join()
+      current = new Date(CUTOFF.getTime() + PAYMENT_GRACE_MS)
+
+      await payments.handleEvent(event())
+
+      expect(publisher.published).toEqual([
+        {
+          room: 'orderItem:item_1',
+          event: 'orderItem:updated',
+          payload: { orderItemId: 'item_1', status: 'CANCELLED', reason: 'PAYMENT_TOO_LATE' },
+        },
+      ])
+    })
+
+    it('un évènement rejoué n’annonce rien de plus', async () => {
+      await join()
+      await payments.handleEvent(event())
+      publisher.published.length = 0
+
+      await payments.handleEvent(event())
+
+      expect(publisher.published).toEqual([])
+    })
+
+    it('un montant refusé n’annonce rien', async () => {
+      await join()
+
+      await expect(payments.handleEvent(event({ amount: 1 }))).rejects.toThrow()
+
+      expect(publisher.published).toEqual([])
+    })
+  })
+})

@@ -56,9 +56,13 @@ describe('loadConfig', () => {
 
     it('doit faire au moins 32 caractères', () => {
       expect(() => loadConfig({ JWT_SECRET: 'trop-court' })).toThrow(/JWT_SECRET/)
-      expect(loadConfig({ NODE_ENV: 'production', JWT_SECRET: 'x'.repeat(32) }).jwtSecret).toBe(
-        'x'.repeat(32),
-      )
+      expect(
+        loadConfig({
+          NODE_ENV: 'production',
+          JWT_SECRET: 'x'.repeat(32),
+          PAYMENT_WEBHOOK_SECRET: 'w'.repeat(32),
+        }).jwtSecret,
+      ).toBe('x'.repeat(32))
     })
   })
 
@@ -73,6 +77,45 @@ describe('loadConfig', () => {
     it('refuse un canal d’envoi inconnu et un indicatif invalide', () => {
       expect(() => loadConfig({ OTP_DELIVERY: 'pigeon' })).toThrow(/OTP_DELIVERY/)
       expect(() => loadConfig({ DEFAULT_COUNTRY_CODE: '+224' })).toThrow(/DEFAULT_COUNTRY_CODE/)
+    })
+  })
+
+  describe('paiement', () => {
+    it('utilise la passerelle de test et un secret de webhook de développement par défaut', () => {
+      const config = loadConfig({})
+
+      expect(config.paymentProvider).toBe('fake')
+      expect(config.paymentWebhookSecret.length).toBeGreaterThanOrEqual(32)
+    })
+
+    it('exige un secret de webhook en production (jamais de secret par défaut en prod)', () => {
+      expect(() => loadConfig({ NODE_ENV: 'production', JWT_SECRET: 'x'.repeat(32) })).toThrow(
+        /PAYMENT_WEBHOOK_SECRET/,
+      )
+      expect(
+        loadConfig({
+          NODE_ENV: 'production',
+          JWT_SECRET: 'x'.repeat(32),
+          PAYMENT_WEBHOOK_SECRET: 'w'.repeat(32),
+        }).paymentWebhookSecret,
+      ).toBe('w'.repeat(32))
+    })
+
+    it('refuse un secret trop court et un opérateur inconnu', () => {
+      expect(() => loadConfig({ PAYMENT_WEBHOOK_SECRET: 'court' })).toThrow(
+        /PAYMENT_WEBHOOK_SECRET/,
+      )
+      expect(() => loadConfig({ PAYMENT_PROVIDER: 'orange' })).toThrow(/PAYMENT_PROVIDER/)
+    })
+  })
+
+  describe('PARTNER_NOTIFICATION', () => {
+    it('écrit les récaps dans les logs par défaut (en attendant WhatsApp / SMS)', () => {
+      expect(loadConfig({}).partnerNotification).toBe('console')
+    })
+
+    it('refuse un canal inconnu', () => {
+      expect(() => loadConfig({ PARTNER_NOTIFICATION: 'pigeon' })).toThrow(/PARTNER_NOTIFICATION/)
     })
   })
 

@@ -1,9 +1,13 @@
+import type { ServerOptions } from 'socket.io'
 import type { RateLimiter } from './lib/rate-limiter.js'
 import type { UserStore } from './services/auth.js'
+import type { ClosingStore } from './services/closing.js'
 import type { GroupOrderStore } from './services/group-order.js'
 import type { OrderItemStore } from './services/order-item.js'
 import type { OtpSender, OtpStore } from './services/otp.js'
+import type { PartnerNotifier } from './services/partner-notifier.js'
 import type { PartnerStore } from './services/partner.js'
+import type { PaymentGateway, PaymentStore } from './services/payment.js'
 
 /**
  * Tout ce que l'application utilise pour parler au monde extérieur (base, Redis, envoi de code).
@@ -16,6 +20,12 @@ export interface AppDeps {
   groupOrderStore: GroupOrderStore
   orderItemStore: OrderItemStore
   partnerStore: PartnerStore
+  paymentStore: PaymentStore
+  paymentGateway: PaymentGateway
+  closingStore: ClosingStore
+  partnerNotifier: PartnerNotifier
   rateLimiter: RateLimiter
   otpSender: OtpSender
+  /** Adaptateur Socket.io (Redis en production) ; sans lui, une seule instance de l'API diffuse. */
+  socketAdapter?: ServerOptions['adapter'] | undefined
 }
