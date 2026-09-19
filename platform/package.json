@@ -1,0 +1,21 @@
+{
+  "name": "toctoc",
+  "private": true,
+  "version": "0.0.1",
+  "packageManager": "pnpm@10.23.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "api": "pnpm --filter @toctoc/api dev",
+    "test": "pnpm -r test:run",
+    "typecheck": "pnpm -r typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.8"
+  }
+}
