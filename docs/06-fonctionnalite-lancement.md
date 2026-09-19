@@ -4,6 +4,17 @@ Décision actée : TocToc ne démarre pas avec une application de livraison comp
 
 Cette fonctionnalité doit être conçue pour produire un **effet waouh** — pas seulement fonctionner, mais surprendre agréablement et donner envie d'en parler. C'est ce qui transforme une commande groupée ordinaire en mécanique virale bottom-up (voir l'insight de [00-vision.md](00-vision.md)) : sans le waouh, ce n'est qu'un panier partagé de plus, copiable en un sprint par n'importe quel concurrent.
 
+## Le principe : un restaurant, puis solo ou groupé
+
+Décidé le 2026-09-20. Le parcours commence par **le choix d'un restaurant** (ou d'une cuisinière) parmi les partenaires de TocToc. Ensuite, deux façons de commander chez lui, **livrées au même créneau** :
+
+- **Seul.** Une commande d'une personne, sans partager quoi que ce soit.
+- **En groupe.** La personne qui commence partage son lien à ses collègues, qui la rejoignent. **Le groupage ne se fait que par ce lien** : l'application ne propose pas de « groupes ouverts » à rejoindre (à réévaluer une fois observé si les gens se regroupent d'eux-mêmes).
+
+**Une commande porte sur un seul restaurant, jamais deux.** Quelqu'un qui veut un autre restaurant lance sa propre commande, que d'autres peuvent à leur tour rejoindre. Plusieurs commandes coexistent donc dans un même immeuble, une par restaurant (voir [08-schema-donnees.md](08-schema-donnees.md)). La raison est concrète : un lien, c'est un seul retrait chez le restaurant et un seul passage du livreur — c'est aussi ce qui rend possible le tarif de livraison dégressif ([04-modele-economique.md](04-modele-economique.md)).
+
+**Le mode solo n'est pas une livraison à la demande.** C'est une commande de groupe dont personne d'autre n'a rejoint le lien : même créneau de livraison, même heure limite, frais de livraison du premier palier (le plus élevé, ce qui donne une raison de se regrouper). La livraison à la demande reste une Phase 3 ([03-roadmap-phases.md](03-roadmap-phases.md)).
+
 ## Le parcours, étape par étape
 
 ### 1. Créer et partager
