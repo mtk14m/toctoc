@@ -1,0 +1,35 @@
+name: CI 
+
+on: 
+    pull_request:
+    push:
+        branches:
+            - main
+
+permissions:
+    contents: read
+
+
+jobs: 
+    quality: 
+        name: Typecheck, format, test
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        defaults: 
+            run: 
+                working-directory: ./platform
+        steps:
+            - uses: actions/checkout@v7
+            - uses: pnpm/action-setup@v6
+              with:
+                package_json_file: ./platform/package.json
+            - uses: actions/setup-node@v7
+              with: 
+                node-version: 24
+                cache: pnpm
+                cache-dependency-path: ./platform/pnpm-lock.yaml
+            - run: pnpm install --frozen-lockfile
+
+            - run: pnpm run typecheck 
+            - run: pnpm run format:check
+            - run: pnpm test
