@@ -12,6 +12,7 @@ import {
   InMemoryRateLimiter,
   InMemoryUserStore,
   RecordingPaymentGateway,
+  RecordingPublisher,
 } from '../helpers/fakes.js'
 
 const NOW = new Date('2026-09-21T08:00:00.000Z')
@@ -26,6 +27,7 @@ describe('OrderItemService.join', () => {
   let users: InMemoryUserStore
   let groups: InMemoryGroupOrderStore
   let store: InMemoryOrderItemStore
+  let publisher: RecordingPublisher
   let service: ReturnType<typeof createOrderItemService>
   let current: Date
 
@@ -45,13 +47,16 @@ describe('OrderItemService.join', () => {
     groups = new InMemoryGroupOrderStore(users)
     const paymentStore = new InMemoryPaymentStore(groups)
     store = new InMemoryOrderItemStore(groups, users, paymentStore)
+    publisher = new RecordingPublisher()
     service = createOrderItemService({
       store,
       users,
+      realtime: publisher,
       // Le lancement du paiement a ses propres tests (payment.test.ts) : ici, une passerelle qui accepte tout.
       payments: createPaymentService({
         store: paymentStore,
         gateway: new RecordingPaymentGateway(),
+        realtime: publisher,
         now: () => current,
       }),
       rateLimiter: new InMemoryRateLimiter(),
@@ -141,6 +146,58 @@ describe('OrderItemService.join', () => {
       await join()
 
       expect(groups.orderItems[0]!.commissionAmount).toBe(218) // 217,5 arrondi vers le haut
+    })
+  })
+
+  describe('temps réel en HOST_PAYS (docs/09 : « en attente du règlement de [créateur] »)', () => {
+    beforeEach(() => {
+      groups.groupOrders[0]!.paymentMode = 'HOST_PAYS'
+    })
+
+    it('annonce tout de suite la personne au groupe, marquée en attente', async () => {
+      await join({ name: 'Aïcha' })
+
+      expect(publisher.published).toEqual([
+        {
+          room: 'groupOrder:group_1',
+          event: 'groupOrder:item_pending',
+          payload: {
+            participant: { name: 'Aïcha', dish: 'Riz gras', quantity: 1, pending: true },
+            nextDeliveryFee: 6000, // le prochain arrivant sera le 2ᵉ
+          },
+        },
+      ])
+    })
+
+    it('annonce le nom du compte, pas celui saisi (pas d’usurpation sur la liste publique)', async () => {
+      await users.create({ phone: '+224622000001', name: 'Aïcha Diallo' })
+
+      await join({ name: 'Quelqu’un d’autre' })
+
+      expect(publisher.published[0]!.payload).toMatchObject({
+        participant: { name: 'Aïcha Diallo' },
+      })
+    })
+
+    it('le tarif annoncé baisse avec le rang', async () => {
+      for (let n = 1; n <= 2; n++) await join({ phone: phone(n) })
+
+      // 2 commandes : le prochain sera le 3ᵉ, deuxième palier
+      expect(publisher.published.at(-1)!.payload).toMatchObject({ nextDeliveryFee: 5000 })
+    })
+
+    it('n’annonce rien quand la commande est refusée', async () => {
+      await expect(join({ menuItemId: 'inconnu' })).rejects.toThrow()
+
+      expect(publisher.published).toEqual([])
+    })
+  })
+
+  describe('temps réel en SPLIT', () => {
+    it('n’annonce rien à la création de la commande : seul un paiement confirmé compte', async () => {
+      await join()
+
+      expect(publisher.published).toEqual([])
     })
   })
 

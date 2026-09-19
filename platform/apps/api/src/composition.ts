@@ -1,3 +1,4 @@
+import { createAdapter } from '@socket.io/redis-adapter'
 import type { AppDeps } from './deps.js'
 import type { Config } from './lib/config.js'
 import { prisma } from './lib/prisma.js'
@@ -40,5 +41,7 @@ export function createProductionDeps(config: Config): AppDeps {
     paymentGateway: createPaymentGateway(config),
     rateLimiter: new RedisRateLimiter(redis),
     otpSender: createOtpSender(config),
+    // Deux connexions dédiées : un client Redis en mode abonné ne peut plus faire d'autres commandes.
+    socketAdapter: createAdapter(redis.duplicate(), redis.duplicate()),
   }
 }

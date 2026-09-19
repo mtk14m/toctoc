@@ -4,8 +4,8 @@ import type { PaymentRecord, PaymentStore } from '../services/payment.js'
 export class PrismaPaymentStore implements PaymentStore {
   constructor(private readonly db: PrismaClient) {}
 
-  findById(id: string): Promise<PaymentRecord | null> {
-    return this.db.payment.findUnique({
+  async findById(id: string): Promise<PaymentRecord | null> {
+    const payment = await this.db.payment.findUnique({
       where: { id },
       select: {
         id: true,
@@ -15,10 +15,26 @@ export class PrismaPaymentStore implements PaymentStore {
           select: {
             id: true,
             status: true,
-            groupOrder: { select: { status: true, orderCutoffTime: true } },
+            quantity: true,
+            user: { select: { name: true } },
+            menuItem: { select: { name: true } },
+            groupOrder: { select: { id: true, status: true, orderCutoffTime: true } },
           },
         },
       },
+    })
+    if (!payment) return null
+
+    const { user, menuItem, ...orderItem } = payment.orderItem
+    return {
+      ...payment,
+      orderItem: { ...orderItem, participantName: user.name, menuItemName: menuItem.name },
+    }
+  }
+
+  countActiveOrderItems(groupOrderId: string): Promise<number> {
+    return this.db.orderItem.count({
+      where: { groupOrderId, status: { not: 'CANCELLED' } },
     })
   }
 

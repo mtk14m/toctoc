@@ -7,6 +7,7 @@ import type { Config } from './lib/config.js'
 import { authenticate } from './plugins/authenticate.js'
 import { registerErrorHandling } from './plugins/error-handler.js'
 import { createRequireRole } from './plugins/require-role.js'
+import { attachSocketServer } from './realtime/socket-server.js'
 import { authRoutes } from './routes/auth.js'
 import { groupOrderRoutes } from './routes/group-orders.js'
 import { healthRoutes } from './routes/health.js'
@@ -62,14 +63,25 @@ export async function buildApp(config: Config, deps: AppDeps) {
     users: deps.userStore,
     rateLimiter: deps.rateLimiter,
   })
+  // Le temps réel s'attache au serveur HTTP de l'application : les tests `inject()` n'écoutent sur
+  // aucun port, et un test qui veut de vrais sockets appelle `app.listen({ port: 0 })`.
+  const realtime = attachSocketServer(app, {
+    corsOrigins: config.corsOrigins,
+    adapter: deps.socketAdapter,
+    findGroupOrderId: async (shareToken) =>
+      (await deps.groupOrderStore.findByShareToken(shareToken))?.id ?? null,
+  })
   const payments = createPaymentService({
     store: deps.paymentStore,
     gateway: deps.paymentGateway,
+    realtime,
+    onError: (err) => app.log.error({ err }, 'temps réel : annonce impossible'),
   })
   const orderItems = createOrderItemService({
     store: deps.orderItemStore,
     users: deps.userStore,
     payments,
+    realtime,
     rateLimiter: deps.rateLimiter,
     defaultCountryCode: config.defaultCountryCode,
   })
