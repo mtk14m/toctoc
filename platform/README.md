@@ -58,6 +58,33 @@ curl -X POST localhost:3000/admin/partners/$PARTNER_ID/menu-items -H "authorizat
   -d '{"name":"Riz gras","price":25000,"availableDate":"2026-09-22"}'
 ```
 
+## Simuler un paiement (avant l'opérateur mobile money)
+
+`PAYMENT_PROVIDER=fake` : aucun opérateur derrière, mais le webhook est vérifié comme le sera celui d'un
+vrai opérateur (signature HMAC-SHA256 du corps brut, en-tête `x-toctoc-signature`). Pour « payer » une
+commande, on envoie soi-même l'évènement signé :
+
+```bash
+# 1. rejoindre un lien (route publique) : la réponse annonce `payment: { status: "PENDING" }`
+curl -X POST localhost:3000/group-orders/$SHARE_TOKEN/items -H 'content-type: application/json' \
+  -d '{"menuItemId":"'$MENU_ITEM_ID'","phone":"622 00 00 01","name":"Aïcha"}'
+
+# 2. la référence du paiement (notre id, que l'opérateur renvoie dans son webhook)
+docker compose -f infra/docker-compose.yml exec postgres \
+  psql -U toctoc -d toctoc -tAc 'SELECT id, amount FROM "Payment" ORDER BY "createdAt" DESC LIMIT 1;'
+
+# 3. le webhook signé (status: CONFIRMED ou FAILED ; amount = celui de l'étape 2)
+SECRET='dev-only-payment-webhook-secret-do-not-use'   # compose : local-compose-webhook-secret-do-not-use-32
+BODY='{"reference":"<id>","providerTransactionId":"tx_1","amount":31000,"status":"CONFIRMED"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.* //')
+curl -X POST localhost:3000/webhooks/payments -H 'content-type: application/json' \
+  -H "x-toctoc-signature: $SIG" -d "$BODY"
+```
+
+Après un `CONFIRMED`, la personne apparaît sur `GET /group-orders/$SHARE_TOKEN`. Un `FAILED` annule sa
+commande (elle peut recommencer). Un paiement reçu après l'heure limite plus 2 minutes est encaissé mais
+la commande reste annulée : le serveur l'écrit dans ses logs, le remboursement est manuel en Phase 1.
+
 ## Commandes
 
 | Commande          | Rôle                                            |

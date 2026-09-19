@@ -1,10 +1,11 @@
-import type { GroupOrderStatus, OrderItemStatus } from '../generated/prisma/enums.js'
+import type { GroupOrderStatus, OrderItemStatus, PaymentMode } from '../generated/prisma/enums.js'
 import { AppError } from '../lib/errors.js'
 import { isValidPhone, normalizePhone } from '../lib/phone.js'
 import type { RateLimiter } from '../lib/rate-limiter.js'
 import { redisKeys } from '../lib/redis-keys.js'
 import { utcDay } from '../lib/utc-day.js'
 import type { UserStore } from './auth.js'
+import type { PaymentService } from './payment.js'
 import { priceOrderItem, type OrderItemPrice } from './pricing.js'
 
 // Endpoint public : pas de compte, donc la limite protège contre le spam de paiements sur le
@@ -20,6 +21,7 @@ export interface JoinableGroupOrder {
   status: GroupOrderStatus
   orderCutoffTime: Date
   deliveryTime: Date
+  paymentMode: PaymentMode
   partner: { id: string; commissionRate: number }
 }
 
@@ -37,6 +39,8 @@ export interface NewOrderItem {
   userId: string
   menuItemId: string
   quantity: number
+  /** Vrai en SPLIT : le paiement (PENDING) est créé dans la même transaction que la commande. */
+  createPayment: boolean
 }
 
 export type AddOrderItemResult =
@@ -44,6 +48,8 @@ export type AddOrderItemResult =
       status: 'created'
       item: { id: string; status: OrderItemStatus }
       price: OrderItemPrice
+      /** Le paiement à lancer chez l'opérateur ; absent en HOST_PAYS (le créateur règle tout). */
+      paymentId: string | null
     }
   | { status: 'already_joined' }
   | { status: 'closed' }
@@ -77,6 +83,7 @@ export interface JoinInput {
 export interface OrderItemServiceDeps {
   store: OrderItemStore
   users: UserStore
+  payments: PaymentService
   rateLimiter: RateLimiter
   defaultCountryCode: string
   now?: () => Date
@@ -86,14 +93,14 @@ const groupOrderClosed = () =>
   new AppError(409, 'GROUP_ORDER_CLOSED', 'Ce lien n’accepte plus de commandes')
 
 export function createOrderItemService(deps: OrderItemServiceDeps) {
-  const { store, users, rateLimiter, defaultCountryCode } = deps
+  const { store, users, payments, rateLimiter, defaultCountryCode } = deps
   const now = deps.now ?? (() => new Date())
 
   return {
     /**
      * Rejoint un lien : crée la commande en attente de paiement, au prix du plat et au tarif de
-     * livraison du rang d'arrivée (figé, jamais recalculé). Le paiement lui-même vient ensuite.
-     * Le participant n'a pas d'OTP : son compte est créé à partir de son numéro.
+     * livraison du rang d'arrivée (figé, jamais recalculé), puis, en SPLIT, lance le paiement
+     * mobile money. Le participant n'a pas d'OTP : son compte est créé à partir de son numéro.
      */
     async join(shareToken: string, input: JoinInput, clientIp: string) {
       const phone = normalizePhone(input.phone, defaultCountryCode)
@@ -138,6 +145,7 @@ export function createOrderItemService(deps: OrderItemServiceDeps) {
           userId: user.id,
           menuItemId: menuItem.id,
           quantity: input.quantity,
+          createPayment: order.paymentMode === 'SPLIT',
         },
         (existingActiveOrderItems) =>
           priceOrderItem({
@@ -153,7 +161,11 @@ export function createOrderItemService(deps: OrderItemServiceDeps) {
         throw new AppError(409, 'ALREADY_JOINED', 'Vous avez déjà une commande sur ce lien')
       }
 
-      const { item, price } = result
+      const { item, price, paymentId } = result
+      // Après la transaction : un appel réseau ne doit pas tenir le verrou du lien. Si l'opérateur
+      // échoue, `start` annule la commande et lève une 502.
+      if (paymentId) await payments.start({ paymentId, amount: price.amount, phone })
+
       return {
         id: item.id,
         status: item.status,
@@ -162,6 +174,7 @@ export function createOrderItemService(deps: OrderItemServiceDeps) {
         unitPrice: price.unitPrice,
         deliveryFee: price.deliveryFee,
         amount: price.amount,
+        payment: paymentId ? { status: 'PENDING' as const } : null,
       }
     },
   }

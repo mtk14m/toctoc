@@ -4,11 +4,14 @@ import {
   MAX_JOINS_PER_PHONE,
   createOrderItemService,
 } from '../../src/services/order-item.js'
+import { createPaymentService } from '../../src/services/payment.js'
 import {
   InMemoryGroupOrderStore,
   InMemoryOrderItemStore,
+  InMemoryPaymentStore,
   InMemoryRateLimiter,
   InMemoryUserStore,
+  RecordingPaymentGateway,
 } from '../helpers/fakes.js'
 
 const NOW = new Date('2026-09-21T08:00:00.000Z')
@@ -40,10 +43,17 @@ describe('OrderItemService.join', () => {
     current = NOW
     users = new InMemoryUserStore()
     groups = new InMemoryGroupOrderStore(users)
-    store = new InMemoryOrderItemStore(groups, users)
+    const paymentStore = new InMemoryPaymentStore(groups)
+    store = new InMemoryOrderItemStore(groups, users, paymentStore)
     service = createOrderItemService({
       store,
       users,
+      // Le lancement du paiement a ses propres tests (payment.test.ts) : ici, une passerelle qui accepte tout.
+      payments: createPaymentService({
+        store: paymentStore,
+        gateway: new RecordingPaymentGateway(),
+        now: () => current,
+      }),
       rateLimiter: new InMemoryRateLimiter(),
       defaultCountryCode: '224',
       now: () => current,
@@ -96,6 +106,7 @@ describe('OrderItemService.join', () => {
         unitPrice: 25000,
         deliveryFee: 6000,
         amount: 31000,
+        payment: { status: 'PENDING' },
       })
     })
 

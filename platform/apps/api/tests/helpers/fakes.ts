@@ -19,6 +19,9 @@ import type {
   OrderItemStore,
 } from '../../src/services/order-item.js'
 import type { OrderItemPrice } from '../../src/services/pricing.js'
+import type { PaymentStatus } from '../../src/generated/prisma/enums.js'
+import { FakePaymentGateway } from '../../src/services/payment-gateway.js'
+import type { PaymentInitiation, PaymentRecord, PaymentStore } from '../../src/services/payment.js'
 import type {
   MenuItemRecord,
   NewMenuItem,
@@ -228,6 +231,110 @@ export class InMemoryPartnerStore implements PartnerStore {
   }
 }
 
+export const TEST_WEBHOOK_SECRET = 'secret-de-webhook-de-test-32-caracteres'
+
+export interface StoredPayment {
+  id: string
+  orderItemId: string
+  amount: number
+  status: PaymentStatus
+  providerTransactionId: string | null
+  paidAt: Date | null
+}
+
+/** Partage l'état du store des liens : confirmer un paiement change la commande, comme en base. */
+export class InMemoryPaymentStore implements PaymentStore {
+  payments: StoredPayment[] = []
+  private sequence = 0
+
+  constructor(private readonly groups: InMemoryGroupOrderStore) {}
+
+  /** Appelé par `InMemoryOrderItemStore` : en base, la même transaction crée commande et paiement. */
+  createPending(orderItemId: string, amount: number): StoredPayment {
+    this.sequence += 1
+    const payment: StoredPayment = {
+      id: `pay_${this.sequence}`,
+      orderItemId,
+      amount,
+      status: 'PENDING',
+      providerTransactionId: null,
+      paidAt: null,
+    }
+    this.payments.push(payment)
+    return payment
+  }
+
+  private orderItemOf(payment: StoredPayment) {
+    const item = this.groups.orderItems.find((i) => i.id === payment.orderItemId)
+    if (!item) throw new Error('Données de test incohérentes')
+    return item
+  }
+
+  async findById(id: string): Promise<PaymentRecord | null> {
+    const payment = this.payments.find((p) => p.id === id)
+    if (!payment) return null
+
+    const item = this.orderItemOf(payment)
+    const order = this.groups.groupOrders.find((o) => o.id === item.groupOrderId)
+    if (!order) throw new Error('Données de test incohérentes')
+
+    return {
+      id: payment.id,
+      amount: payment.amount,
+      status: payment.status,
+      orderItem: {
+        id: item.id,
+        status: item.status,
+        groupOrder: { status: order.status, orderCutoffTime: order.orderCutoffTime },
+      },
+    }
+  }
+
+  async settle(
+    paymentId: string,
+    input: {
+      providerTransactionId: string
+      paidAt: Date
+      orderItemStatus: 'CONFIRMED' | 'CANCELLED'
+    },
+  ): Promise<boolean> {
+    const payment = this.payments.find((p) => p.id === paymentId)
+    if (!payment || payment.status !== 'PENDING') return false
+
+    payment.status = 'CONFIRMED'
+    payment.providerTransactionId = input.providerTransactionId
+    payment.paidAt = input.paidAt
+    const item = this.orderItemOf(payment)
+    if (item.status === 'PENDING_PAYMENT') item.status = input.orderItemStatus
+    return true
+  }
+
+  async fail(paymentId: string): Promise<boolean> {
+    const payment = this.payments.find((p) => p.id === paymentId)
+    if (!payment || payment.status !== 'PENDING') return false
+
+    payment.status = 'FAILED'
+    const item = this.orderItemOf(payment)
+    if (item.status === 'PENDING_PAYMENT') item.status = 'CANCELLED'
+    return true
+  }
+}
+
+/** Le vrai calcul de signature (celui de la passerelle de dev), avec une trace des initiations. */
+export class RecordingPaymentGateway extends FakePaymentGateway {
+  initiated: PaymentInitiation[] = []
+  failWith: Error | null = null
+
+  constructor(webhookSecret = TEST_WEBHOOK_SECRET) {
+    super({ webhookSecret })
+  }
+
+  override async initiate(input: PaymentInitiation): Promise<void> {
+    if (this.failWith) throw this.failWith
+    this.initiated.push(input)
+  }
+}
+
 /**
  * Les commandes partagent l'état du store des liens : une commande créée par `join` apparaît
  * ensuite sur la page publique du lien, comme en base.
@@ -240,6 +347,7 @@ export class InMemoryOrderItemStore implements OrderItemStore {
   constructor(
     private readonly groups: InMemoryGroupOrderStore,
     private readonly users: InMemoryUserStore,
+    private readonly payments: InMemoryPaymentStore,
   ) {}
 
   async findGroupOrderForJoin(shareToken: string): Promise<JoinableGroupOrder | null> {
@@ -251,6 +359,7 @@ export class InMemoryOrderItemStore implements OrderItemStore {
       status: order.status,
       orderCutoffTime: order.orderCutoffTime,
       deliveryTime: order.deliveryTime,
+      paymentMode: order.paymentMode,
       partner: {
         id: order.partnerId,
         commissionRate: this.commissionRates.get(order.partnerId) ?? 0.15,
@@ -298,7 +407,10 @@ export class InMemoryOrderItemStore implements OrderItemStore {
       commissionAmount: price.commissionAmount,
     }
     this.groups.orderItems.push(item)
-    return { status: 'created', item: { id: item.id, status: item.status }, price }
+    const paymentId = input.createPayment
+      ? this.payments.createPending(item.id, price.amount).id
+      : null
+    return { status: 'created', item: { id: item.id, status: item.status }, price, paymentId }
   }
 }
 
@@ -336,11 +448,14 @@ export class RecordingOtpSender implements OtpSender {
 export function createTestDeps() {
   const userStore = new InMemoryUserStore()
   const groupOrderStore = new InMemoryGroupOrderStore(userStore)
+  const paymentStore = new InMemoryPaymentStore(groupOrderStore)
   return {
     otpStore: new InMemoryOtpStore(),
     userStore,
     groupOrderStore,
-    orderItemStore: new InMemoryOrderItemStore(groupOrderStore, userStore),
+    orderItemStore: new InMemoryOrderItemStore(groupOrderStore, userStore, paymentStore),
+    paymentStore,
+    paymentGateway: new RecordingPaymentGateway(),
     partnerStore: new InMemoryPartnerStore(),
     rateLimiter: new InMemoryRateLimiter(),
     otpSender: new RecordingOtpSender(),

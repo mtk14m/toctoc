@@ -7,6 +7,7 @@ import type {
   NewOrderItem,
   OrderItemStore,
 } from '../services/order-item.js'
+import { PAYMENT_CURRENCY } from '../services/payment.js'
 import type { OrderItemPrice } from '../services/pricing.js'
 
 export class PrismaOrderItemStore implements OrderItemStore {
@@ -20,6 +21,7 @@ export class PrismaOrderItemStore implements OrderItemStore {
         status: true,
         orderCutoffTime: true,
         deliveryTime: true,
+        paymentMode: true,
         partner: { select: { id: true, commissionRate: true } },
       },
     })
@@ -72,7 +74,19 @@ export class PrismaOrderItemStore implements OrderItemStore {
         select: { id: true, status: true },
       })
 
-      return { status: 'created' as const, item, price }
+      const payment = input.createPayment
+        ? await tx.payment.create({
+            data: {
+              orderItemId: item.id,
+              amount: price.amount,
+              currency: PAYMENT_CURRENCY,
+              provider: 'MOBILE_MONEY',
+            },
+            select: { id: true },
+          })
+        : null
+
+      return { status: 'created' as const, item, price, paymentId: payment?.id ?? null }
     })
   }
 }

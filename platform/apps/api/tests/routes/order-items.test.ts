@@ -82,6 +82,7 @@ describe('routes POST /group-orders/:shareToken/items', () => {
       unitPrice: 25000,
       deliveryFee: 6000,
       amount: 31000,
+      payment: { status: 'PENDING' },
     })
   })
 

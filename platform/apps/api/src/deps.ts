@@ -4,6 +4,7 @@ import type { GroupOrderStore } from './services/group-order.js'
 import type { OrderItemStore } from './services/order-item.js'
 import type { OtpSender, OtpStore } from './services/otp.js'
 import type { PartnerStore } from './services/partner.js'
+import type { PaymentGateway, PaymentStore } from './services/payment.js'
 
 /**
  * Tout ce que l'application utilise pour parler au monde extérieur (base, Redis, envoi de code).
@@ -16,6 +17,8 @@ export interface AppDeps {
   groupOrderStore: GroupOrderStore
   orderItemStore: OrderItemStore
   partnerStore: PartnerStore
+  paymentStore: PaymentStore
+  paymentGateway: PaymentGateway
   rateLimiter: RateLimiter
   otpSender: OtpSender
 }
