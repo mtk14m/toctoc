@@ -7,8 +7,10 @@ import type { Config } from './lib/config.js'
 import { authenticate } from './plugins/authenticate.js'
 import { registerErrorHandling } from './plugins/error-handler.js'
 import { authRoutes } from './routes/auth.js'
+import { groupOrderRoutes } from './routes/group-orders.js'
 import { healthRoutes } from './routes/health.js'
 import { createAuthService } from './services/auth.js'
+import { createGroupOrderService } from './services/group-order.js'
 import { createOtpService } from './services/otp.js'
 
 function loggerOptions(config: Config) {
@@ -47,6 +49,11 @@ export async function buildApp(config: Config, deps: AppDeps) {
     secret: config.jwtSecret,
   })
   const authService = createAuthService({ otp, users: deps.userStore })
+  const groupOrders = createGroupOrderService({
+    store: deps.groupOrderStore,
+    users: deps.userStore,
+    rateLimiter: deps.rateLimiter,
+  })
 
   await app.register(healthRoutes)
   await app.register(authRoutes, {
@@ -56,6 +63,7 @@ export async function buildApp(config: Config, deps: AppDeps) {
     userStore: deps.userStore,
     defaultCountryCode: config.defaultCountryCode,
   })
+  await app.register(groupOrderRoutes, { prefix: '/group-orders', groupOrders })
 
   return app
 }
