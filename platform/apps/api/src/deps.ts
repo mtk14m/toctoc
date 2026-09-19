@@ -1,3 +1,4 @@
+import type { ServerOptions } from 'socket.io'
 import type { RateLimiter } from './lib/rate-limiter.js'
 import type { UserStore } from './services/auth.js'
 import type { GroupOrderStore } from './services/group-order.js'
@@ -21,4 +22,6 @@ export interface AppDeps {
   paymentGateway: PaymentGateway
   rateLimiter: RateLimiter
   otpSender: OtpSender
+  /** Adaptateur Socket.io (Redis en production) ; sans lui, une seule instance de l'API diffuse. */
+  socketAdapter?: ServerOptions['adapter'] | undefined
 }

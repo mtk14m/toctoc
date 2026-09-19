@@ -4,9 +4,10 @@ import { isValidPhone, normalizePhone } from '../lib/phone.js'
 import type { RateLimiter } from '../lib/rate-limiter.js'
 import { redisKeys } from '../lib/redis-keys.js'
 import { utcDay } from '../lib/utc-day.js'
+import { groupOrderRoom, type RealtimePublisher } from '../realtime/events.js'
 import type { UserStore } from './auth.js'
 import type { PaymentService } from './payment.js'
-import { priceOrderItem, type OrderItemPrice } from './pricing.js'
+import { deliveryFeeForRank, priceOrderItem, type OrderItemPrice } from './pricing.js'
 
 // Endpoint public : pas de compte, donc la limite protège contre le spam de paiements sur le
 // numéro de quelqu'un d'autre et contre la création de comptes en masse.
@@ -84,6 +85,7 @@ export interface OrderItemServiceDeps {
   store: OrderItemStore
   users: UserStore
   payments: PaymentService
+  realtime: RealtimePublisher
   rateLimiter: RateLimiter
   defaultCountryCode: string
   now?: () => Date
@@ -93,7 +95,7 @@ const groupOrderClosed = () =>
   new AppError(409, 'GROUP_ORDER_CLOSED', 'Ce lien n’accepte plus de commandes')
 
 export function createOrderItemService(deps: OrderItemServiceDeps) {
-  const { store, users, payments, rateLimiter, defaultCountryCode } = deps
+  const { store, users, payments, realtime, rateLimiter, defaultCountryCode } = deps
   const now = deps.now ?? (() => new Date())
 
   return {
@@ -165,6 +167,21 @@ export function createOrderItemService(deps: OrderItemServiceDeps) {
       // Après la transaction : un appel réseau ne doit pas tenir le verrou du lien. Si l'opérateur
       // échoue, `start` annule la commande et lève une 502.
       if (paymentId) await payments.start({ paymentId, amount: price.amount, phone })
+
+      // En SPLIT, la personne n'apparaît qu'une fois payée (voir PaymentService). En HOST_PAYS,
+      // personne ne paie individuellement : tout le monde est « en attente » ensemble, et ce
+      // n'est pas trompeur (docs/06), donc on l'annonce tout de suite.
+      if (order.paymentMode === 'HOST_PAYS') {
+        realtime.publish(groupOrderRoom(order.id), 'groupOrder:item_pending', {
+          participant: {
+            name: user.name,
+            dish: menuItem.name,
+            quantity: input.quantity,
+            pending: true,
+          },
+          nextDeliveryFee: deliveryFeeForRank(price.rank + 1),
+        })
+      }
 
       return {
         id: item.id,

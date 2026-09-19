@@ -306,5 +306,35 @@ describe('GroupOrderService', () => {
         }
       })
     })
+
+    describe('nextDeliveryFee — le tarif que paiera le prochain arrivant (le waouh n°2)', () => {
+      it('démarre au premier palier quand personne n’a encore commandé', async () => {
+        const view = await service.getByShareToken(shareToken)
+
+        expect(view.nextDeliveryFee).toBe(6000)
+      })
+
+      it('baisse avec les commandes en cours, payées ou non, comme le rang réel d’un arrivant', async () => {
+        seedItem('Aïcha', 'Riz gras', 'CONFIRMED')
+        seedItem('Ibrahima', 'Riz gras', 'PENDING_PAYMENT')
+
+        // 2 commandes actives : le prochain sera le 3ᵉ, deuxième palier
+        expect((await service.getByShareToken(shareToken)).nextDeliveryFee).toBe(5000)
+      })
+
+      it('ne compte pas les commandes annulées', async () => {
+        seedItem('Aïcha', 'Riz gras', 'CONFIRMED')
+        seedItem('Fatou', 'Riz gras', 'CANCELLED')
+        seedItem('Ibrahima', 'Riz gras', 'CANCELLED')
+
+        expect((await service.getByShareToken(shareToken)).nextDeliveryFee).toBe(6000)
+      })
+
+      it('s’arrête au plancher, quel que soit le nombre de participants', async () => {
+        for (let i = 0; i < 25; i++) seedItem(`Collègue ${i}`, 'Riz gras', 'CONFIRMED')
+
+        expect((await service.getByShareToken(shareToken)).nextDeliveryFee).toBe(3000)
+      })
+    })
   })
 })

@@ -22,6 +22,7 @@ import type { OrderItemPrice } from '../../src/services/pricing.js'
 import type { PaymentStatus } from '../../src/generated/prisma/enums.js'
 import { FakePaymentGateway } from '../../src/services/payment-gateway.js'
 import type { PaymentInitiation, PaymentRecord, PaymentStore } from '../../src/services/payment.js'
+import type { RealtimePublisher, ServerToClientEvents } from '../../src/realtime/events.js'
 import type {
   MenuItemRecord,
   NewMenuItem,
@@ -285,9 +286,22 @@ export class InMemoryPaymentStore implements PaymentStore {
       orderItem: {
         id: item.id,
         status: item.status,
-        groupOrder: { status: order.status, orderCutoffTime: order.orderCutoffTime },
+        quantity: item.quantity,
+        participantName: item.participantName,
+        menuItemName: item.menuItemName,
+        groupOrder: {
+          id: order.id,
+          status: order.status,
+          orderCutoffTime: order.orderCutoffTime,
+        },
       },
     }
+  }
+
+  async countActiveOrderItems(groupOrderId: string): Promise<number> {
+    return this.groups.orderItems.filter(
+      (i) => i.groupOrderId === groupOrderId && i.status !== 'CANCELLED',
+    ).length
   }
 
   async settle(
@@ -317,6 +331,19 @@ export class InMemoryPaymentStore implements PaymentStore {
     const item = this.orderItemOf(payment)
     if (item.status === 'PENDING_PAYMENT') item.status = 'CANCELLED'
     return true
+  }
+}
+
+/** Garde trace de ce qui serait diffusé, sans serveur Socket.io. */
+export class RecordingPublisher implements RealtimePublisher {
+  published: Array<{ room: string; event: string; payload: unknown }> = []
+
+  publish<E extends keyof ServerToClientEvents>(
+    room: string,
+    event: E,
+    ...args: Parameters<ServerToClientEvents[E]>
+  ): void {
+    this.published.push({ room, event, payload: args[0] })
   }
 }
 

@@ -1,5 +1,12 @@
 import type { GroupOrderStatus, OrderItemStatus, PaymentStatus } from '../generated/prisma/enums.js'
 import { AppError } from '../lib/errors.js'
+import {
+  groupOrderRoom,
+  orderItemRoom,
+  type OrderItemUpdateReason,
+  type RealtimePublisher,
+} from '../realtime/events.js'
+import { deliveryFeeForRank } from './pricing.js'
 
 /** Fenêtre de grâce après l'heure limite pour un paiement déjà lancé (docs/09 §1). */
 export const PAYMENT_GRACE_MS = 2 * 60 * 1000
@@ -45,13 +52,18 @@ export interface PaymentRecord {
   orderItem: {
     id: string
     status: OrderItemStatus
-    groupOrder: { status: GroupOrderStatus; orderCutoffTime: Date }
+    quantity: number
+    participantName: string
+    menuItemName: string
+    groupOrder: { id: string; status: GroupOrderStatus; orderCutoffTime: Date }
   }
 }
 
 /** Persistance des paiements. Prisma en production, en mémoire dans les tests. */
 export interface PaymentStore {
   findById(id: string): Promise<PaymentRecord | null>
+  /** Commandes non annulées du lien : c'est ce qui détermine le rang du prochain arrivant. */
+  countActiveOrderItems(groupOrderId: string): Promise<number>
   /**
    * Encaisse : Payment PENDING → CONFIRMED, et la commande passe de PENDING_PAYMENT à
    * `orderItemStatus` (sans toucher une commande déjà annulée). Atomique : renvoie faux si le
@@ -74,12 +86,52 @@ export type PaymentOutcome = 'confirmed' | 'late' | 'failed' | 'already_processe
 export interface PaymentServiceDeps {
   store: PaymentStore
   gateway: PaymentGateway
+  realtime: RealtimePublisher
+  /** Une annonce temps réel qui échoue est journalisée, jamais propagée : l'argent est déjà encaissé. */
+  onError?: (error: unknown) => void
   now?: () => Date
 }
 
 export function createPaymentService(deps: PaymentServiceDeps) {
-  const { store, gateway } = deps
+  const { store, gateway, realtime } = deps
   const now = deps.now ?? (() => new Date())
+  const onError = deps.onError ?? (() => undefined)
+
+  /** Prévient la personne, et elle seule (la room de sa commande). */
+  const tellPerson = (
+    orderItemId: string,
+    status: OrderItemStatus,
+    reason: OrderItemUpdateReason,
+  ) =>
+    realtime.publish(orderItemRoom(orderItemId), 'orderItem:updated', {
+      orderItemId,
+      status,
+      reason,
+    })
+
+  /** Annonce à tous ceux qui ont ouvert le lien : la liste s'allonge, et le tarif suivant baisse peut-être. */
+  async function announceToGroup(payment: PaymentRecord): Promise<void> {
+    const { orderItem } = payment
+    const active = await store.countActiveOrderItems(orderItem.groupOrder.id)
+    realtime.publish(groupOrderRoom(orderItem.groupOrder.id), 'groupOrder:item_added', {
+      participant: {
+        name: orderItem.participantName,
+        dish: orderItem.menuItemName,
+        quantity: orderItem.quantity,
+        pending: false,
+      },
+      nextDeliveryFee: deliveryFeeForRank(active + 1),
+    })
+  }
+
+  /** Best effort : le paiement est réglé, une annonce ratée ne doit pas faire rejouer le webhook. */
+  async function bestEffort(work: () => void | Promise<void>): Promise<void> {
+    try {
+      await work()
+    } catch (error) {
+      onError(error)
+    }
+  }
 
   async function handleEvent(event: PaymentEvent): Promise<PaymentOutcome> {
     const payment = await store.findById(event.reference)
@@ -93,7 +145,9 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     if (payment.status !== 'PENDING') return 'already_processed'
 
     if (event.status === 'FAILED') {
-      return (await store.fail(payment.id)) ? 'failed' : 'already_processed'
+      if (!(await store.fail(payment.id))) return 'already_processed'
+      await bestEffort(() => tellPerson(payment.orderItem.id, 'CANCELLED', 'PAYMENT_FAILED'))
+      return 'failed'
     }
 
     const paidAt = now()
@@ -112,7 +166,17 @@ export function createPaymentService(deps: PaymentServiceDeps) {
       orderItemStatus: onTime ? 'CONFIRMED' : 'CANCELLED',
     })
     if (!applied) return 'already_processed'
-    return onTime ? 'confirmed' : 'late'
+
+    if (!onTime) {
+      await bestEffort(() => tellPerson(orderItem.id, 'CANCELLED', 'PAYMENT_TOO_LATE'))
+      return 'late'
+    }
+
+    await bestEffort(async () => {
+      await announceToGroup(payment)
+      tellPerson(orderItem.id, 'CONFIRMED', 'PAYMENT_CONFIRMED')
+    })
+    return 'confirmed'
   }
 
   return {

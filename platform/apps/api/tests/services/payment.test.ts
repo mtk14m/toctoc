@@ -8,6 +8,7 @@ import {
   InMemoryRateLimiter,
   InMemoryUserStore,
   RecordingPaymentGateway,
+  RecordingPublisher,
 } from '../helpers/fakes.js'
 
 const NOW = new Date('2026-09-21T08:00:00.000Z')
@@ -19,6 +20,7 @@ describe('PaymentService', () => {
   let groups: InMemoryGroupOrderStore
   let paymentStore: InMemoryPaymentStore
   let gateway: RecordingPaymentGateway
+  let publisher: RecordingPublisher
   let payments: ReturnType<typeof createPaymentService>
   let orderItems: ReturnType<typeof createOrderItemService>
   let current: Date
@@ -40,11 +42,18 @@ describe('PaymentService', () => {
     groups = new InMemoryGroupOrderStore(users)
     paymentStore = new InMemoryPaymentStore(groups)
     gateway = new RecordingPaymentGateway()
-    payments = createPaymentService({ store: paymentStore, gateway, now: () => current })
+    publisher = new RecordingPublisher()
+    payments = createPaymentService({
+      store: paymentStore,
+      gateway,
+      realtime: publisher,
+      now: () => current,
+    })
     orderItems = createOrderItemService({
       store: new InMemoryOrderItemStore(groups, users, paymentStore),
       users,
       payments,
+      realtime: publisher,
       rateLimiter: new InMemoryRateLimiter(),
       defaultCountryCode: '224',
       now: () => current,
@@ -248,6 +257,92 @@ describe('PaymentService', () => {
       await payments.handleEvent(event({ status: 'FAILED' }))
 
       expect(await payments.handleEvent(event({ status: 'FAILED' }))).toBe('already_processed')
+    })
+  })
+
+  describe('évènements temps réel', () => {
+    const groupRoom = 'groupOrder:group_1'
+
+    it('rejoindre en SPLIT n’annonce rien au groupe : la personne n’a pas encore payé', async () => {
+      await join('622000001', 'Aïcha')
+
+      expect(publisher.published).toEqual([])
+    })
+
+    it('un paiement confirmé fait apparaître la personne chez tous ceux qui ont ouvert le lien', async () => {
+      await join('622000001', 'Aïcha')
+      await join('622000002', 'Mamadou')
+
+      await payments.handleEvent(event())
+
+      expect(publisher.published).toContainEqual({
+        room: groupRoom,
+        event: 'groupOrder:item_added',
+        payload: {
+          participant: { name: 'Aïcha', dish: 'Riz gras', quantity: 1, pending: false },
+          // 2 commandes actives : le prochain arrivant sera le 3ᵉ (deuxième palier)
+          nextDeliveryFee: 5000,
+        },
+      })
+    })
+
+    it('prévient en privé la personne concernée, dans une room qui n’est que la sienne', async () => {
+      await join()
+
+      await payments.handleEvent(event())
+
+      expect(publisher.published).toContainEqual({
+        room: 'orderItem:item_1',
+        event: 'orderItem:updated',
+        payload: { orderItemId: 'item_1', status: 'CONFIRMED', reason: 'PAYMENT_CONFIRMED' },
+      })
+    })
+
+    it('un échec ne prévient que la personne concernée, jamais le groupe', async () => {
+      await join()
+
+      await payments.handleEvent(event({ status: 'FAILED' }))
+
+      expect(publisher.published).toEqual([
+        {
+          room: 'orderItem:item_1',
+          event: 'orderItem:updated',
+          payload: { orderItemId: 'item_1', status: 'CANCELLED', reason: 'PAYMENT_FAILED' },
+        },
+      ])
+    })
+
+    it('un paiement trop tard prévient la personne (pas de repas) sans rien annoncer au groupe', async () => {
+      await join()
+      current = new Date(CUTOFF.getTime() + PAYMENT_GRACE_MS)
+
+      await payments.handleEvent(event())
+
+      expect(publisher.published).toEqual([
+        {
+          room: 'orderItem:item_1',
+          event: 'orderItem:updated',
+          payload: { orderItemId: 'item_1', status: 'CANCELLED', reason: 'PAYMENT_TOO_LATE' },
+        },
+      ])
+    })
+
+    it('un évènement rejoué n’annonce rien de plus', async () => {
+      await join()
+      await payments.handleEvent(event())
+      publisher.published.length = 0
+
+      await payments.handleEvent(event())
+
+      expect(publisher.published).toEqual([])
+    })
+
+    it('un montant refusé n’annonce rien', async () => {
+      await join()
+
+      await expect(payments.handleEvent(event({ amount: 1 }))).rejects.toThrow()
+
+      expect(publisher.published).toEqual([])
     })
   })
 })

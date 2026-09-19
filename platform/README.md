@@ -85,6 +85,28 @@ Après un `CONFIRMED`, la personne apparaît sur `GET /group-orders/$SHARE_TOKEN
 commande (elle peut recommencer). Un paiement reçu après l'heure limite plus 2 minutes est encaissé mais
 la commande reste annulée : le serveur l'écrit dans ses logs, le remboursement est manuel en Phase 1.
 
+## Suivre un lien en direct (Socket.io)
+
+Le temps réel est sur le même port que l'API. Il est public, comme la page du lien : le jeton du lien suffit.
+Le contrat complet (évènements, noms de rooms) est dans `apps/api/src/realtime/events.ts`.
+
+```js
+import { io } from 'socket.io-client'
+const socket = io('http://localhost:3000')
+
+// le groupe : la liste qui se remplit, et le tarif que paiera le prochain arrivant
+socket.emit('groupOrder:join', { shareToken }, console.log) // → { ok: true }
+socket.on('groupOrder:item_added', console.log) // { participant, nextDeliveryFee } : paiement confirmé
+socket.on('groupOrder:item_pending', console.log) // idem en HOST_PAYS : en attente du règlement du créateur
+
+// la personne : son propre message, avec l'id de commande reçu au moment de rejoindre
+socket.emit('orderItem:watch', { orderItemId }, console.log)
+socket.on('orderItem:updated', console.log) // { orderItemId, status, reason: PAYMENT_CONFIRMED | PAYMENT_FAILED | PAYMENT_TOO_LATE }
+```
+
+En production, l'adaptateur Redis relaie les évènements entre plusieurs instances de l'API. Les
+deux connexions Redis dédiées qu'il utilise s'ajoutent à celle de l'API.
+
 ## Commandes
 
 | Commande          | Rôle                                            |
