@@ -109,6 +109,16 @@ describe('loadConfig', () => {
     })
   })
 
+  describe('PARTNER_NOTIFICATION', () => {
+    it('écrit les récaps dans les logs par défaut (en attendant WhatsApp / SMS)', () => {
+      expect(loadConfig({}).partnerNotification).toBe('console')
+    })
+
+    it('refuse un canal inconnu', () => {
+      expect(() => loadConfig({ PARTNER_NOTIFICATION: 'pigeon' })).toThrow(/PARTNER_NOTIFICATION/)
+    })
+  })
+
   describe('TRUST_PROXY', () => {
     it('est désactivé par défaut : sans proxy, X-Forwarded-For serait falsifiable', () => {
       expect(loadConfig({}).trustProxy).toBe(false)

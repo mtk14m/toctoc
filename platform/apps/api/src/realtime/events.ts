@@ -20,13 +20,23 @@ export interface ParticipantAnnouncement {
   nextDeliveryFee: number
 }
 
-export type OrderItemUpdateReason = 'PAYMENT_CONFIRMED' | 'PAYMENT_FAILED' | 'PAYMENT_TOO_LATE'
+export type OrderItemUpdateReason =
+  | 'PAYMENT_CONFIRMED'
+  | 'PAYMENT_FAILED'
+  | 'PAYMENT_TOO_LATE'
+  /** Le lien s'est fermé avant que ce paiement n'aboutisse : à rejouer le lendemain. */
+  | 'LINK_CLOSED'
 
 export interface ServerToClientEvents {
   /** Room du lien. Un paiement vient d'être confirmé : la liste du groupe s'allonge. */
   'groupOrder:item_added': (payload: ParticipantAnnouncement) => void
   /** Room du lien, mode HOST_PAYS : quelqu'un a choisi son plat, en attente du règlement du créateur. */
   'groupOrder:item_pending': (payload: ParticipantAnnouncement) => void
+  /**
+   * Room du lien. L'heure limite est passée : CLOSED (le récap part chez le partenaire) ou
+   * CANCELLED quand personne n'a payé (pas de livraison).
+   */
+  'groupOrder:closed': (payload: { status: 'CLOSED' | 'CANCELLED' }) => void
   /** Room de la commande : le message privé de la personne qui a commandé, jamais celui du groupe. */
   'orderItem:updated': (payload: {
     orderItemId: string

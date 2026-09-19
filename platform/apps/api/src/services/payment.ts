@@ -59,6 +59,9 @@ export interface PaymentRecord {
   }
 }
 
+export type SettleResult =
+  { applied: false } | { applied: true; orderItemStatus: 'CONFIRMED' | 'CANCELLED' }
+
 /** Persistance des paiements. Prisma en production, en mémoire dans les tests. */
 export interface PaymentStore {
   findById(id: string): Promise<PaymentRecord | null>
@@ -66,8 +69,12 @@ export interface PaymentStore {
   countActiveOrderItems(groupOrderId: string): Promise<number>
   /**
    * Encaisse : Payment PENDING → CONFIRMED, et la commande passe de PENDING_PAYMENT à
-   * `orderItemStatus` (sans toucher une commande déjà annulée). Atomique : renvoie faux si le
+   * `orderItemStatus` (sans toucher une commande déjà annulée). Atomique : `applied: false` si le
    * paiement n'était plus PENDING, donc un seul de deux appels simultanés l'emporte.
+   *
+   * Sous le même verrou que la clôture du lien : si le lien n'est plus ouvert au moment d'écrire,
+   * la commande n'est jamais confirmée, même si `orderItemStatus` le demandait. Le résultat dit
+   * l'état final de la commande — c'est lui qui fait foi, pas la demande.
    */
   settle(
     paymentId: string,
@@ -76,7 +83,7 @@ export interface PaymentStore {
       paidAt: Date
       orderItemStatus: 'CONFIRMED' | 'CANCELLED'
     },
-  ): Promise<boolean>
+  ): Promise<SettleResult>
   /** Échec : Payment PENDING → FAILED, commande PENDING_PAYMENT → CANCELLED. Atomique comme `settle`. */
   fail(paymentId: string): Promise<boolean>
 }
@@ -160,14 +167,15 @@ export function createPaymentService(deps: PaymentServiceDeps) {
       orderItem.groupOrder.status === 'OPEN' &&
       paidAt.getTime() < orderItem.groupOrder.orderCutoffTime.getTime() + PAYMENT_GRACE_MS
 
-    const applied = await store.settle(payment.id, {
+    const settled = await store.settle(payment.id, {
       providerTransactionId: event.providerTransactionId,
       paidAt,
       orderItemStatus: onTime ? 'CONFIRMED' : 'CANCELLED',
     })
-    if (!applied) return 'already_processed'
+    if (!settled.applied) return 'already_processed'
 
-    if (!onTime) {
+    // L'état final de la commande fait foi, pas notre décision : le lien a pu se fermer entre-temps.
+    if (settled.orderItemStatus !== 'CONFIRMED') {
       await bestEffort(() => tellPerson(orderItem.id, 'CANCELLED', 'PAYMENT_TOO_LATE'))
       return 'late'
     }

@@ -1,5 +1,5 @@
 import type { PrismaClient } from '../generated/prisma/client.js'
-import type { PaymentRecord, PaymentStore } from '../services/payment.js'
+import type { PaymentRecord, PaymentStore, SettleResult } from '../services/payment.js'
 
 export class PrismaPaymentStore implements PaymentStore {
   constructor(private readonly db: PrismaClient) {}
@@ -45,8 +45,19 @@ export class PrismaPaymentStore implements PaymentStore {
       paidAt: Date
       orderItemStatus: 'CONFIRMED' | 'CANCELLED'
     },
-  ): Promise<boolean> {
+  ): Promise<SettleResult> {
     return this.db.$transaction(async (tx) => {
+      const payment = await tx.payment.findUnique({
+        where: { id: paymentId },
+        select: { orderItem: { select: { id: true, groupOrderId: true } } },
+      })
+      if (!payment) return { applied: false as const }
+      const { id: orderItemId, groupOrderId } = payment.orderItem
+
+      // Le même verrou que `join` et la clôture : on écrit soit avant la fermeture du lien, soit
+      // après l'avoir vue, jamais au milieu.
+      await tx.$queryRaw`SELECT "id" FROM "GroupOrder" WHERE "id" = ${groupOrderId} FOR UPDATE`
+
       // `status: 'PENDING'` dans le filtre : la base garantit qu'un seul des appels simultanés gagne.
       const { count } = await tx.payment.updateMany({
         where: { id: paymentId, status: 'PENDING' },
@@ -56,18 +67,33 @@ export class PrismaPaymentStore implements PaymentStore {
           paidAt: input.paidAt,
         },
       })
-      if (count !== 1) return false
+      if (count !== 1) return { applied: false as const }
 
-      const { orderItemId } = await tx.payment.findUniqueOrThrow({
-        where: { id: paymentId },
-        select: { orderItemId: true },
+      // Un lien qui n'est plus ouvert ne confirme plus rien, même si on nous le demandait.
+      const group = await tx.groupOrder.findUniqueOrThrow({
+        where: { id: groupOrderId },
+        select: { status: true },
       })
-      // Une commande déjà annulée le reste : l'argent est encaissé, le remboursement est à part.
+      const target =
+        input.orderItemStatus === 'CONFIRMED' && group.status !== 'OPEN'
+          ? 'CANCELLED'
+          : input.orderItemStatus
+      // Une commande déjà annulée (par la clôture) le reste : l'argent est encaissé, le
+      // remboursement est à part.
       await tx.orderItem.updateMany({
         where: { id: orderItemId, status: 'PENDING_PAYMENT' },
-        data: { status: input.orderItemStatus },
+        data: { status: target },
       })
-      return true
+
+      const item = await tx.orderItem.findUniqueOrThrow({
+        where: { id: orderItemId },
+        select: { status: true },
+      })
+      return {
+        applied: true as const,
+        orderItemStatus:
+          item.status === 'CONFIRMED' ? ('CONFIRMED' as const) : ('CANCELLED' as const),
+      }
     })
   }
 
