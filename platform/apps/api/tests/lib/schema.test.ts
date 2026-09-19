@@ -110,6 +110,12 @@ describe('schéma Prisma', () => {
     expect(getField('Payment', 'orderItemId').attributes).toContain('@unique')
   })
 
+  it('OtpCode ne stocke jamais le code en clair, et compte les essais ratés', () => {
+    expect(models.get('OtpCode')?.has('code')).toBe(false)
+    expect(getField('OtpCode', 'codeHash').type).toBe('String')
+    expect(getField('OtpCode', 'attempts').type).toBe('Int')
+  })
+
   it('User.phone est unique', () => {
     expect(getField('User', 'phone').attributes).toContain('@unique')
   })
