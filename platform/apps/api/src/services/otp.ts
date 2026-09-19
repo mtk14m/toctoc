@@ -1,7 +1,8 @@
-import { createHmac, randomInt, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomInt } from 'node:crypto'
 import { AppError } from '../lib/errors.js'
 import type { RateLimiter } from '../lib/rate-limiter.js'
 import { redisKeys } from '../lib/redis-keys.js'
+import { safeEqual } from '../lib/safe-equal.js'
 
 export const OTP_TTL_MS = 5 * 60 * 1000
 export const MAX_OTP_REQUESTS = 3
@@ -39,12 +40,6 @@ export function generateOtpCode(): string {
 
 function hashCode(secret: string, phone: string, code: string): string {
   return createHmac('sha256', secret).update(`${phone}:${code}`).digest('hex')
-}
-
-function safeEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a)
-  const right = Buffer.from(b)
-  return left.length === right.length && timingSafeEqual(left, right)
 }
 
 // Une seule erreur pour « inconnu », « expiré », « bloqué » et « faux » : on ne révèle rien.
