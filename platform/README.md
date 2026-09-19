@@ -36,6 +36,28 @@ curl -X POST localhost:3000/auth/otp/verify -H 'content-type: application/json' 
   -d '{"phone":"621 00 00 00","code":"123456","name":"Aïcha"}'   # `name` seulement à la 1re connexion
 ```
 
+## Créer le premier admin, un partenaire et son menu
+
+Aucune route ne donne le rôle `ADMIN_PLATFORM` (c'est voulu) : le premier admin se promeut en base,
+après s'être connecté une fois par OTP.
+
+```bash
+docker compose -f infra/docker-compose.yml exec postgres \
+  psql -U toctoc -d toctoc -c "UPDATE \"User\" SET role = 'ADMIN_PLATFORM' WHERE phone = '+224621000000';"
+```
+
+Le jeton reste valable, le rôle est relu en base à chaque appel `/admin/*`. Ensuite, avec le jeton de l'admin
+(`Authorization: Bearer …`) :
+
+```bash
+# un partenaire (commissionRate optionnel, 15 % par défaut)
+curl -X POST localhost:3000/admin/partners -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"name":"Chez Aïssatou","type":"CUISINE_MAISON","phone":"622 00 00 00","address":"Almamya","city":"Conakry"}'
+# son plat du jour (prix en GNF entiers, date AAAA-MM-JJ)
+curl -X POST localhost:3000/admin/partners/$PARTNER_ID/menu-items -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"name":"Riz gras","price":25000,"availableDate":"2026-09-22"}'
+```
+
 ## Commandes
 
 | Commande          | Rôle                                            |
