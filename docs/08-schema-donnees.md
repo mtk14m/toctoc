@@ -239,12 +239,13 @@ model User {
 model OtpCode {
   id        String   @id @default(cuid())
   phone     String
-  code      String
+  codeHash  String   // HMAC du code, jamais le code en clair
+  attempts  Int      @default(0) // essais ratés, le code est bloqué à 5
   expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  @@index([phone])
+  @@index([phone, createdAt])
 }
 
 model Partner {
@@ -437,6 +438,7 @@ model AuditLog {
 ## Notes de conception
 
 - **Source de vérité : `platform/apps/api/prisma/schema.prisma`.** Le bloc ci-dessus est le raisonnement de conception ; en cas d'écart, c'est le fichier du dépôt qui fait foi. Écarts déjà assumés : Prisma 7 (l'URL de la base vit dans `prisma.config.ts`, plus dans le schéma), un index sur `Payment.providerTransactionId` (le webhook mobile money retrouve le paiement par cette référence), et des index sur `GroupOrder.creatorId`, `OrderItem.userId` et `Delivery(driverId, status)`.
+- **`OtpCode` : le code n'est jamais stocké, seulement son HMAC (`codeHash`), et chaque essai raté est compté (`attempts`).** Décidé en construisant l'auth, en corrigeant trois faiblesses vues dans CityMoov : code en clair en base, aucune limite d'essais à la vérification (6 chiffres = 1 million de combinaisons, devinables), et plusieurs codes actifs en même temps. Ici : HMAC-SHA256 avec un secret côté serveur (une fuite de la base seule ne livre pas les codes), blocage à 5 essais (la limite du doc 09 pour le code de livraison, même esprit), un seul code actif par numéro (en demander un nouveau invalide l'ancien), consommation atomique (`UPDATE … WHERE used = false`, un seul appel gagne).
 - **Tous les montants sont des `Int`, jamais des `Float` (décidé au démarrage du développement).** Le GNF n'a pas de sous-unité, et `Float` accumule des erreurs d'arrondi dès qu'on additionne des paiements (un `Payout` agrégé sur une semaine ne doit jamais avoir un franc d'écart avec la somme des `Payment`). Seuls restent en `Float` : `Partner.commissionRate` (un ratio, pas un montant) et les coordonnées GPS. Conséquence à l'implémentation : `commissionAmount = Math.round(unitPrice × quantity × commissionRate)` — l'arrondi est explicite, à un seul endroit (`services/pricing`), et testé. Un test (`tests/lib/schema.test.ts`) empêche de réintroduire un `Float` monétaire par inadvertance.
 - **`unitPrice` copié sur `OrderItem`** : si le partenaire change son prix le lendemain, les commandes déjà passées ne doivent pas bouger rétroactivement — même logique que `Trip.estimatedPrice` figé dans CityMoov.
 - **`shareToken` sur `GroupOrder`** : c'est littéralement le lien partagé (`toctoc.app/g/{shareToken}`) — généré aléatoirement, pas l'id interne, pour ne pas exposer d'information séquentielle.
