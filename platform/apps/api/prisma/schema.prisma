@@ -4,8 +4,9 @@
 // Le GNF n'a pas de sous-unité, et Float accumule des erreurs d'arrondi sur les sommes.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  importFileExtension = "js" // sans ça, imports en `.ts` que tsc recopie tels quels dans dist/
 }
 
 datasource db {
@@ -97,12 +98,13 @@ model User {
 model OtpCode {
   id        String   @id @default(cuid())
   phone     String
-  code      String
+  codeHash  String // HMAC du code : le code lui-même n'est jamais stocké
+  attempts  Int      @default(0) // essais ratés ; le code est bloqué à 5
   expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  @@index([phone])
+  @@index([phone, createdAt])
 }
 
 model Partner {

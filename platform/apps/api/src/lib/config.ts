@@ -1,20 +1,38 @@
 import { z } from 'zod'
 
-const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  REDIS_URL: z.url().default('redis://localhost:6380'),
-  DATABASE_URL: z.url().default('postgresql://toctoc:toctoc@localhost:5433/toctoc'),
-  CORS_ORIGIN: z
-    .string()
-    .default('http://localhost:5173')
-    .transform((value) =>
-      value
-        .split(',')
-        .map((origin) => origin.trim())
-        .filter(Boolean),
-    ),
-})
+// Secret utilisable uniquement hors production : en production, JWT_SECRET est obligatoire.
+const DEV_JWT_SECRET = 'dev-only-jwt-secret-do-not-use-in-production'
+
+const envSchema = z
+  .object({
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+    REDIS_URL: z.url().default('redis://localhost:6380'),
+    DATABASE_URL: z.url().default('postgresql://toctoc:toctoc@localhost:5433/toctoc'),
+    CORS_ORIGIN: z
+      .string()
+      .default('http://localhost:5173')
+      .transform((value) =>
+        value
+          .split(',')
+          .map((origin) => origin.trim())
+          .filter(Boolean),
+      ),
+    JWT_SECRET: z.string().min(32).optional(),
+    // Canal d'envoi des codes OTP. Seul 'console' existe pour l'instant (le code est écrit dans
+    // les logs) ; 'whatsapp' et 'sms' viendront avec leur fournisseur.
+    OTP_DELIVERY: z.enum(['console']).default('console'),
+    // Indicatif ajouté aux numéros saisis sans préfixe international (224 = Guinée).
+    DEFAULT_COUNTRY_CODE: z
+      .string()
+      .regex(/^\d{1,3}$/, 'chiffres seulement, sans le +')
+      .default('224'),
+  })
+  .superRefine((env, ctx) => {
+    if (env.NODE_ENV === 'production' && !env.JWT_SECRET) {
+      ctx.addIssue({ code: 'custom', path: ['JWT_SECRET'], message: 'obligatoire en production' })
+    }
+  })
 
 export interface Config {
   nodeEnv: 'development' | 'test' | 'production'
@@ -22,6 +40,9 @@ export interface Config {
   redisUrl: string
   databaseUrl: string
   corsOrigins: string[]
+  jwtSecret: string
+  otpDelivery: 'console'
+  defaultCountryCode: string
 }
 
 /**
@@ -29,7 +50,9 @@ export interface Config {
  * Une config invalide doit faire échouer le boot, pas produire un comportement flou plus tard.
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const parsed = envSchema.safeParse(env)
+  // Une variable vide (`JWT_SECRET=` dans un .env, ou `${X:-}` dans Docker) vaut « non définie ».
+  const definedEnv = Object.fromEntries(Object.entries(env).filter(([, value]) => value !== ''))
+  const parsed = envSchema.safeParse(definedEnv)
 
   if (!parsed.success) {
     const details = parsed.error.issues
@@ -44,5 +67,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     redisUrl: parsed.data.REDIS_URL,
     databaseUrl: parsed.data.DATABASE_URL,
     corsOrigins: parsed.data.CORS_ORIGIN,
+    jwtSecret: parsed.data.JWT_SECRET ?? DEV_JWT_SECRET,
+    otpDelivery: parsed.data.OTP_DELIVERY,
+    defaultCountryCode: parsed.data.DEFAULT_COUNTRY_CODE,
   }
 }

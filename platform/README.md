@@ -13,15 +13,40 @@ pnpm --filter @toctoc/api db:migrate           # applique les migrations Prisma
 pnpm api                                       # http://localhost:3000/health
 ```
 
+## Tout lancer en conteneur
+
+```bash
+pnpm stack:up      # construit l'image, applique les migrations, démarre l'API sur :3000
+pnpm stack:logs    # suit les logs de l'API — c'est là que s'affiche le code de connexion
+pnpm stack:down
+```
+
+`stack:up` remplace `pnpm api` : les deux écoutent sur le port 3000, ne pas lancer les deux.
+L'image (`apps/api/Dockerfile`, ~380 Mo) est construite en trois étapes : `build` (compile), `migrate`
+(applique les migrations Prisma avant l'API), `runtime` (Node nu, utilisateur non-root, sans outils de dev).
+
+## Se connecter (avant l'envoi WhatsApp)
+
+Le code de connexion n'est pas envoyé : il est écrit dans les logs de l'API (`OTP_DELIVERY=console`).
+
+```bash
+curl -X POST localhost:3000/auth/otp/request -H 'content-type: application/json' -d '{"phone":"621 00 00 00"}'
+# → lire le code dans les logs (`pnpm api` : le terminal ; `pnpm stack:up` : `pnpm stack:logs`)
+curl -X POST localhost:3000/auth/otp/verify -H 'content-type: application/json' \
+  -d '{"phone":"621 00 00 00","code":"123456","name":"Aïcha"}'   # `name` seulement à la 1re connexion
+```
+
 ## Commandes
 
-| Commande          | Rôle                              |
-| ----------------- | --------------------------------- |
-| `pnpm test`       | Tests unitaires (Vitest)          |
-| `pnpm typecheck`  | Vérification TypeScript           |
-| `pnpm format`     | Formatage Prettier                |
-| `pnpm infra:up`   | Lance Postgres et Redis en Docker |
-| `pnpm infra:down` | Les arrête                        |
+| Commande          | Rôle                                            |
+| ----------------- | ----------------------------------------------- |
+| `pnpm test`       | Tests unitaires (Vitest)                        |
+| `pnpm typecheck`  | Vérification TypeScript                         |
+| `pnpm format`     | Formatage Prettier                              |
+| `pnpm infra:up`   | Lance Postgres et Redis seuls (pour `pnpm api`) |
+| `pnpm infra:down` | Les arrête                                      |
+| `pnpm stack:up`   | Lance tout : Postgres, Redis, migrations, API   |
+| `pnpm stack:down` | Arrête tout                                     |
 
 ## Conventions
 
