@@ -5,6 +5,7 @@ import { RedisRateLimiter } from './lib/rate-limiter.js'
 import { redis } from './lib/redis.js'
 import { ConsoleOtpSender } from './services/otp-sender.js'
 import type { OtpSender } from './services/otp.js'
+import { PrismaGroupOrderStore } from './stores/prisma-group-order-store.js'
 import { PrismaOtpStore } from './stores/prisma-otp-store.js'
 import { PrismaUserStore } from './stores/prisma-user-store.js'
 
@@ -20,6 +21,7 @@ export function createProductionDeps(config: Config): AppDeps {
   return {
     otpStore: new PrismaOtpStore(prisma),
     userStore: new PrismaUserStore(prisma),
+    groupOrderStore: new PrismaGroupOrderStore(prisma),
     rateLimiter: new RedisRateLimiter(redis),
     otpSender: createOtpSender(config),
   }
