@@ -15,6 +15,8 @@ Décidé le 2026-09-20. Le parcours commence par **le choix d'un restaurant** (o
 
 **Le mode solo n'est pas une livraison à la demande.** C'est une commande de groupe dont personne d'autre n'a rejoint le lien : même créneau de livraison, même heure limite, frais de livraison du premier palier (le plus élevé, ce qui donne une raison de se regrouper). La livraison à la demande reste une Phase 3 ([03-roadmap-phases.md](03-roadmap-phases.md)).
 
+**Une limite voulue, à ne pas « corriger ».** Deux collègues qui lancent chacun une commande chez le même restaurant sans se voir paient chacun le frais du premier palier : TocToc ne les rapproche pas, et l'interface ne les avertit pas. C'est voulu — le coût les pousse à **se passer le mot avant de commander**, ce qui joue sur l'effet de groupe que le produit cherche à créer. Pas de message d'atténuation, pas de détection de doublons ; à réexaminer seulement si les données de la Phase 0 montrent que ça fait fuir plutôt que rassembler.
+
 ## Le parcours, étape par étape
 
 ### 1. Créer et partager
