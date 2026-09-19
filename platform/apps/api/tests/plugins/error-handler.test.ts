@@ -3,13 +3,14 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { buildApp } from '../../src/app.js'
 import { loadConfig } from '../../src/lib/config.js'
+import { createTestDeps } from '../helpers/fakes.js'
 import { AppError } from '../../src/lib/errors.js'
 
 describe('gestion des erreurs', () => {
   let app: FastifyInstance
 
   beforeAll(async () => {
-    app = await buildApp(loadConfig({ NODE_ENV: 'test' }))
+    app = await buildApp(loadConfig({ NODE_ENV: 'test' }), createTestDeps())
 
     app.get('/_test/app-error', async () => {
       throw new AppError(409, 'GROUP_ORDER_CLOSED', 'Ce lien est fermé')

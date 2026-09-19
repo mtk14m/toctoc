@@ -37,6 +37,45 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ REDIS_URL: 'pas-une-url' })).toThrow(/REDIS_URL/)
   })
 
+  describe('JWT_SECRET', () => {
+    it('a une valeur de développement par défaut hors production', () => {
+      expect(loadConfig({}).jwtSecret.length).toBeGreaterThanOrEqual(32)
+      expect(loadConfig({ NODE_ENV: 'test' }).jwtSecret.length).toBeGreaterThanOrEqual(32)
+    })
+
+    it('est obligatoire en production (jamais de secret par défaut en prod)', () => {
+      expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(/JWT_SECRET/)
+    })
+
+    it('traite une variable vide comme non définie (cas de .env.example copié tel quel)', () => {
+      expect(loadConfig({ JWT_SECRET: '' }).jwtSecret.length).toBeGreaterThanOrEqual(32)
+      expect(loadConfig({ PORT: '' }).port).toBe(3000)
+      // ... sans jamais fabriquer de secret par défaut en production
+      expect(() => loadConfig({ NODE_ENV: 'production', JWT_SECRET: '' })).toThrow(/JWT_SECRET/)
+    })
+
+    it('doit faire au moins 32 caractères', () => {
+      expect(() => loadConfig({ JWT_SECRET: 'trop-court' })).toThrow(/JWT_SECRET/)
+      expect(loadConfig({ NODE_ENV: 'production', JWT_SECRET: 'x'.repeat(32) }).jwtSecret).toBe(
+        'x'.repeat(32),
+      )
+    })
+  })
+
+  describe('envoi des OTP et pays par défaut', () => {
+    it('envoie les OTP dans la console par défaut, avec l’indicatif de la Guinée', () => {
+      const config = loadConfig({})
+
+      expect(config.otpDelivery).toBe('console')
+      expect(config.defaultCountryCode).toBe('224')
+    })
+
+    it('refuse un canal d’envoi inconnu et un indicatif invalide', () => {
+      expect(() => loadConfig({ OTP_DELIVERY: 'pigeon' })).toThrow(/OTP_DELIVERY/)
+      expect(() => loadConfig({ DEFAULT_COUNTRY_CODE: '+224' })).toThrow(/DEFAULT_COUNTRY_CODE/)
+    })
+  })
+
   it('lit DATABASE_URL et refuse une valeur qui n’est pas une URL', () => {
     const url = 'postgresql://user:pass@db.example:5432/toctoc'
 
