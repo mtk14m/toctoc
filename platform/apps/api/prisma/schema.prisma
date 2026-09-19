@@ -4,8 +4,9 @@
 // Le GNF n'a pas de sous-unité, et Float accumule des erreurs d'arrondi sur les sommes.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  importFileExtension = "js" // sans ça, imports en `.ts` que tsc recopie tels quels dans dist/
 }
 
 datasource db {

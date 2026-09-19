@@ -13,7 +13,10 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
-    "infra:down": "docker compose -f infra/docker-compose.yml down"
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "stack:up": "docker compose -f infra/docker-compose.yml --profile app up -d --build",
+    "stack:logs": "docker compose -f infra/docker-compose.yml --profile app logs -f api",
+    "stack:down": "docker compose -f infra/docker-compose.yml --profile app down"
   },
   "devDependencies": {
     "prettier": "^3.9.8"

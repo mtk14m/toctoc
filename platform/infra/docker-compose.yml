@@ -1,4 +1,4 @@
-# Services de développement : Postgres + Redis.
+# Postgres + Redis pour le développement, et (profil `app`) l'API conteneurisée.
 # Ports hôte décalés (5433 / 6380) pour ne pas entrer en conflit avec citimoov-v2 (5432 / 6379).
 name: toctoc
 
@@ -32,6 +32,51 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # ── L'API elle-même (profil « app », absent de `pnpm infra:up`) ────────────────────────
+  # `pnpm stack:up` construit l'image, applique les migrations, puis démarre l'API.
+  # Réglages LOCAUX uniquement (mot de passe et JWT_SECRET par défaut) : la production aura
+  # son propre fichier, avec des secrets réels et Caddy devant.
+  migrate:
+    profiles: [app]
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+    environment:
+      DATABASE_URL: postgresql://toctoc:toctoc@postgres:5432/toctoc
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    profiles: [app]
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://toctoc:toctoc@postgres:5432/toctoc
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-local-compose-secret-do-not-use-elsewhere-32ch}
+      OTP_DELIVERY: console # le code de connexion apparaît dans `pnpm stack:logs`
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/health']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
 volumes:
   postgres_data:
