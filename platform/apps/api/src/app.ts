@@ -36,7 +36,7 @@ function loggerOptions(config: Config) {
  * Les dépendances externes arrivent par `deps` (voir deps.ts).
  */
 export async function buildApp(config: Config, deps: AppDeps) {
-  const app = Fastify({ logger: loggerOptions(config) })
+  const app = Fastify({ logger: loggerOptions(config), trustProxy: config.trustProxy })
 
   registerErrorHandling(app)
 

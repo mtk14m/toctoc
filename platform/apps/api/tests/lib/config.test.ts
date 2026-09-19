@@ -76,6 +76,18 @@ describe('loadConfig', () => {
     })
   })
 
+  describe('TRUST_PROXY', () => {
+    it('est désactivé par défaut : sans proxy, X-Forwarded-For serait falsifiable', () => {
+      expect(loadConfig({}).trustProxy).toBe(false)
+    })
+
+    it('s’active explicitement (API derrière Caddy) et refuse une valeur floue', () => {
+      expect(loadConfig({ TRUST_PROXY: 'true' }).trustProxy).toBe(true)
+      expect(loadConfig({ TRUST_PROXY: 'false' }).trustProxy).toBe(false)
+      expect(() => loadConfig({ TRUST_PROXY: 'peut-etre' })).toThrow(/TRUST_PROXY/)
+    })
+  })
+
   it('lit DATABASE_URL et refuse une valeur qui n’est pas une URL', () => {
     const url = 'postgresql://user:pass@db.example:5432/toctoc'
 

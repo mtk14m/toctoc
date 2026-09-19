@@ -27,6 +27,9 @@ const envSchema = z
       .string()
       .regex(/^\d{1,3}$/, 'chiffres seulement, sans le +')
       .default('224'),
+    // À activer uniquement quand l'API n'est joignable que par le reverse proxy (Caddy) : Fastify
+    // lit alors l'IP du client dans X-Forwarded-For. Sans proxy, cet en-tête est falsifiable.
+    TRUST_PROXY: z.stringbool().default(false),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && !env.JWT_SECRET) {
@@ -43,6 +46,7 @@ export interface Config {
   jwtSecret: string
   otpDelivery: 'console'
   defaultCountryCode: string
+  trustProxy: boolean
 }
 
 /**
@@ -70,5 +74,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     jwtSecret: parsed.data.JWT_SECRET ?? DEV_JWT_SECRET,
     otpDelivery: parsed.data.OTP_DELIVERY,
     defaultCountryCode: parsed.data.DEFAULT_COUNTRY_CODE,
+    trustProxy: parsed.data.TRUST_PROXY,
   }
 }
