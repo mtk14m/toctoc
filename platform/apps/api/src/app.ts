@@ -15,11 +15,19 @@ import { orderItemRoutes } from './routes/order-items.js'
 import { adminPartnerRoutes, partnerRoutes } from './routes/partners.js'
 import { webhookRoutes } from './routes/webhooks.js'
 import { createAuthService } from './services/auth.js'
+import { createClosingService, type ClosingService } from './services/closing.js'
 import { createGroupOrderService } from './services/group-order.js'
 import { createOrderItemService } from './services/order-item.js'
 import { createOtpService } from './services/otp.js'
 import { createPartnerService } from './services/partner.js'
 import { createPaymentService } from './services/payment.js'
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /** La clôture des liens : `server.ts` la planifie (BullMQ), les tests l'appellent directement. */
+    closingService: ClosingService
+  }
+}
 
 function loggerOptions(config: Config) {
   switch (config.nodeEnv) {
@@ -77,6 +85,15 @@ export async function buildApp(config: Config, deps: AppDeps) {
     realtime,
     onError: (err) => app.log.error({ err }, 'temps réel : annonce impossible'),
   })
+  app.decorate(
+    'closingService',
+    createClosingService({
+      store: deps.closingStore,
+      notifier: deps.partnerNotifier,
+      realtime,
+      onError: (err) => app.log.error({ err }, 'clôture : un lien n’a pas pu être traité'),
+    }),
+  )
   const orderItems = createOrderItemService({
     store: deps.orderItemStore,
     users: deps.userStore,

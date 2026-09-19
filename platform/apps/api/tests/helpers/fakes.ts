@@ -21,7 +21,14 @@ import type {
 import type { OrderItemPrice } from '../../src/services/pricing.js'
 import type { PaymentStatus } from '../../src/generated/prisma/enums.js'
 import { FakePaymentGateway } from '../../src/services/payment-gateway.js'
-import type { PaymentInitiation, PaymentRecord, PaymentStore } from '../../src/services/payment.js'
+import type {
+  PaymentInitiation,
+  PaymentRecord,
+  PaymentStore,
+  SettleResult,
+} from '../../src/services/payment.js'
+import type { CloseResult, ClosingStore, RecapCandidate } from '../../src/services/closing.js'
+import type { PartnerNotifier } from '../../src/services/partner-notifier.js'
 import type { RealtimePublisher, ServerToClientEvents } from '../../src/realtime/events.js'
 import type {
   MenuItemRecord,
@@ -128,7 +135,9 @@ export class InMemoryGroupOrderStore implements GroupOrderStore {
       commissionAmount?: number
     }
   > = []
-  groupOrders: Array<NewGroupOrder & { id: string; status: GroupOrderStatus }> = []
+  groupOrders: Array<
+    NewGroupOrder & { id: string; status: GroupOrderStatus; partnerNotifiedAt?: Date | null }
+  > = []
   private sequence = 0
 
   /** Le nom du créateur vient des utilisateurs : en base, c'est une jointure. */
@@ -311,16 +320,24 @@ export class InMemoryPaymentStore implements PaymentStore {
       paidAt: Date
       orderItemStatus: 'CONFIRMED' | 'CANCELLED'
     },
-  ): Promise<boolean> {
+  ): Promise<SettleResult> {
     const payment = this.payments.find((p) => p.id === paymentId)
-    if (!payment || payment.status !== 'PENDING') return false
+    if (!payment || payment.status !== 'PENDING') return { applied: false }
 
     payment.status = 'CONFIRMED'
     payment.providerTransactionId = input.providerTransactionId
     payment.paidAt = input.paidAt
     const item = this.orderItemOf(payment)
-    if (item.status === 'PENDING_PAYMENT') item.status = input.orderItemStatus
-    return true
+    const order = this.groups.groupOrders.find((o) => o.id === item.groupOrderId)
+    if (item.status === 'PENDING_PAYMENT') {
+      // Comme sous le verrou du lien en base : un lien qui n'est plus ouvert ne confirme plus rien.
+      const stillOpen = order?.status === 'OPEN'
+      item.status = input.orderItemStatus === 'CONFIRMED' && stillOpen ? 'CONFIRMED' : 'CANCELLED'
+    }
+    return {
+      applied: true,
+      orderItemStatus: item.status === 'CONFIRMED' ? 'CONFIRMED' : 'CANCELLED',
+    }
   }
 
   async fail(paymentId: string): Promise<boolean> {
@@ -331,6 +348,88 @@ export class InMemoryPaymentStore implements PaymentStore {
     const item = this.orderItemOf(payment)
     if (item.status === 'PENDING_PAYMENT') item.status = 'CANCELLED'
     return true
+  }
+}
+
+/** Partage l'état du store des liens : fermer un lien change ses commandes, comme en base. */
+export class InMemoryClosingStore implements ClosingStore {
+  /** Téléphone du partenaire ; un numéro par défaut pour ne pas avoir à tout déclarer. */
+  partnerPhones = new Map<string, string>()
+  /** Fait échouer la fermeture de ce lien : une panne de base sur un lien, pas sur les autres. */
+  failFor: string | null = null
+
+  constructor(private readonly groups: InMemoryGroupOrderStore) {}
+
+  async findDueGroupOrderIds(cutoffBefore: Date, limit: number): Promise<string[]> {
+    return this.groups.groupOrders
+      .filter(
+        (o) =>
+          o.status === 'OPEN' &&
+          o.paymentMode === 'SPLIT' &&
+          o.orderCutoffTime.getTime() <= cutoffBefore.getTime(),
+      )
+      .sort((a, b) => a.orderCutoffTime.getTime() - b.orderCutoffTime.getTime())
+      .slice(0, limit)
+      .map((o) => o.id)
+  }
+
+  async close(groupOrderId: string): Promise<CloseResult> {
+    if (this.failFor === groupOrderId) throw new Error('base indisponible')
+
+    const order = this.groups.groupOrders.find((o) => o.id === groupOrderId)
+    if (!order || order.status !== 'OPEN') return { status: 'skipped' }
+
+    const items = this.groups.orderItems.filter((i) => i.groupOrderId === groupOrderId)
+    const unpaid = items.filter((i) => i.status === 'PENDING_PAYMENT')
+    for (const item of unpaid) item.status = 'CANCELLED'
+
+    const anyPaid = items.some((i) => i.status === 'CONFIRMED')
+    order.status = anyPaid ? 'CLOSED' : 'CANCELLED'
+    return {
+      status: anyPaid ? 'closed' : 'cancelled',
+      cancelledOrderItemIds: unpaid.map((i) => i.id),
+    }
+  }
+
+  async findPendingRecaps(limit: number): Promise<RecapCandidate[]> {
+    return this.groups.groupOrders
+      .filter((o) => o.status === 'CLOSED' && !o.partnerNotifiedAt)
+      .slice(0, limit)
+      .map((order) => {
+        const partner = this.groups.partners.find((p) => p.id === order.partnerId)
+        if (!partner) throw new Error('Données de test incohérentes')
+        return {
+          groupOrderId: order.id,
+          partner: {
+            name: partner.name,
+            phone: this.partnerPhones.get(partner.id) ?? '+224622000000',
+          },
+          deliveryAddress: order.deliveryAddress,
+          deliveryTime: order.deliveryTime,
+          items: this.groups.orderItems
+            .filter((i) => i.groupOrderId === order.id && i.status === 'CONFIRMED')
+            .map((i) => ({ dish: i.menuItemName, quantity: i.quantity })),
+        }
+      })
+  }
+
+  async markPartnerNotified(groupOrderId: string, at: Date): Promise<void> {
+    const order = this.groups.groupOrders.find((o) => o.id === groupOrderId)
+    if (order && !order.partnerNotifiedAt) order.partnerNotifiedAt = at
+  }
+}
+
+export class RecordingPartnerNotifier implements PartnerNotifier {
+  sent: Array<{ partner: { name: string; phone: string }; message: string }> = []
+  /** Tout envoi échoue. */
+  failWith: Error | null = null
+  /** Seuls les envois vers ce numéro échouent. */
+  failForPhone: string | null = null
+
+  async sendRecap(partner: { name: string; phone: string }, message: string): Promise<void> {
+    if (this.failWith) throw this.failWith
+    if (partner.phone === this.failForPhone) throw new Error('WhatsApp indisponible')
+    this.sent.push({ partner, message })
   }
 }
 
@@ -483,6 +582,8 @@ export function createTestDeps() {
     orderItemStore: new InMemoryOrderItemStore(groupOrderStore, userStore, paymentStore),
     paymentStore,
     paymentGateway: new RecordingPaymentGateway(),
+    closingStore: new InMemoryClosingStore(groupOrderStore),
+    partnerNotifier: new RecordingPartnerNotifier(),
     partnerStore: new InMemoryPartnerStore(),
     rateLimiter: new InMemoryRateLimiter(),
     otpSender: new RecordingOtpSender(),

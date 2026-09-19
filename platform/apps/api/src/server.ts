@@ -3,6 +3,7 @@ import { createProductionDeps } from './composition.js'
 import { loadConfig } from './lib/config.js'
 import { prisma } from './lib/prisma.js'
 import { redis } from './lib/redis.js'
+import { scheduleClosingWorker } from './jobs/closing-worker.js'
 
 const config = loadConfig()
 
@@ -27,11 +28,25 @@ if (config.nodeEnv === 'production' && config.paymentProvider === 'fake') {
       'PAYMENT_WEBHOOK_SECRET peut « payer ». À réserver au pilote interne.',
   )
 }
+if (config.nodeEnv === 'production' && config.partnerNotification === 'console') {
+  app.log.warn(
+    'PARTNER_NOTIFICATION=console en production : les récaps partenaires sont écrits dans les logs, ' +
+      "personne ne les transmet tant que l'équipe ne les lit pas. À réserver au pilote interne.",
+  )
+}
+
+// Les jobs planifiés démarrent au boot, avant d'écouter (docs/07).
+const closingWorker = await scheduleClosingWorker({
+  connection: redis,
+  closing: app.closingService,
+  log: app.log,
+})
 
 // Arrêt propre : on cesse d'accepter des requêtes, on laisse finir celles en cours, puis on ferme les connexions.
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, async () => {
     app.log.info({ signal }, 'Arrêt en cours')
+    await closingWorker.close() // laisse finir le passage en cours avant de couper Redis
     await app.close()
     await prisma.$disconnect()
     await redis.quit()

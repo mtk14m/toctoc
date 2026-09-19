@@ -6,8 +6,10 @@ import { RedisRateLimiter } from './lib/rate-limiter.js'
 import { redis } from './lib/redis.js'
 import { ConsoleOtpSender } from './services/otp-sender.js'
 import type { OtpSender } from './services/otp.js'
+import { ConsolePartnerNotifier, type PartnerNotifier } from './services/partner-notifier.js'
 import { FakePaymentGateway } from './services/payment-gateway.js'
 import type { PaymentGateway } from './services/payment.js'
+import { PrismaClosingStore } from './stores/prisma-closing-store.js'
 import { PrismaGroupOrderStore } from './stores/prisma-group-order-store.js'
 import { PrismaOrderItemStore } from './stores/prisma-order-item-store.js'
 import { PrismaOtpStore } from './stores/prisma-otp-store.js'
@@ -19,6 +21,13 @@ function createOtpSender(config: Config): OtpSender {
   switch (config.otpDelivery) {
     case 'console':
       return new ConsoleOtpSender()
+  }
+}
+
+function createPartnerNotifier(config: Config): PartnerNotifier {
+  switch (config.partnerNotification) {
+    case 'console':
+      return new ConsolePartnerNotifier()
   }
 }
 
@@ -39,6 +48,8 @@ export function createProductionDeps(config: Config): AppDeps {
     partnerStore: new PrismaPartnerStore(prisma),
     paymentStore: new PrismaPaymentStore(prisma),
     paymentGateway: createPaymentGateway(config),
+    closingStore: new PrismaClosingStore(prisma),
+    partnerNotifier: createPartnerNotifier(config),
     rateLimiter: new RedisRateLimiter(redis),
     otpSender: createOtpSender(config),
     // Deux connexions dédiées : un client Redis en mode abonné ne peut plus faire d'autres commandes.

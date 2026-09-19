@@ -155,6 +155,9 @@ model GroupOrder {
   deliveryTime    DateTime
   paymentMode     PaymentMode      @default(SPLIT) // figé à la création
   status          GroupOrderStatus @default(OPEN)
+  // Posé quand le récap a été transmis au partenaire : tant qu'il est vide, la clôture réessaie
+  // (un plantage entre « lien fermé » et « récap envoyé » ne doit jamais perdre le message).
+  partnerNotifiedAt DateTime?
   createdAt       DateTime         @default(now())
   orderItems      OrderItem[]
   delivery        Delivery?

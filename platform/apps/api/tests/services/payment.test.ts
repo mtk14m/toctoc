@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { PAYMENT_GRACE_MS, createPaymentService } from '../../src/services/payment.js'
+import { createClosingService } from '../../src/services/closing.js'
 import { createOrderItemService } from '../../src/services/order-item.js'
 import {
+  InMemoryClosingStore,
   InMemoryGroupOrderStore,
   InMemoryOrderItemStore,
   InMemoryPaymentStore,
   InMemoryRateLimiter,
   InMemoryUserStore,
+  RecordingPartnerNotifier,
   RecordingPaymentGateway,
   RecordingPublisher,
 } from '../helpers/fakes.js'
@@ -257,6 +260,44 @@ describe('PaymentService', () => {
       await payments.handleEvent(event({ status: 'FAILED' }))
 
       expect(await payments.handleEvent(event({ status: 'FAILED' }))).toBe('already_processed')
+    })
+  })
+
+  describe('après la clôture du lien', () => {
+    it('un débit qui arrive après la clôture est encaissé, la commande reste annulée : « late »', async () => {
+      await join()
+      current = new Date(CUTOFF.getTime() + PAYMENT_GRACE_MS)
+      await createClosingService({
+        store: new InMemoryClosingStore(groups),
+        notifier: new RecordingPartnerNotifier(),
+        realtime: publisher,
+        now: () => current,
+      }).closeDue()
+      publisher.published.length = 0
+
+      const outcome = await payments.handleEvent(event())
+
+      expect(outcome).toBe('late')
+      expect(paymentStore.payments[0]!.status).toBe('CONFIRMED') // l'argent est bien parti
+      expect(groups.orderItems[0]!.status).toBe('CANCELLED') // pas de repas : à rembourser
+      expect(publisher.published.map((p) => p.event)).toEqual(['orderItem:updated'])
+    })
+
+    it('un lien clôturé entre la décision et l’écriture ne fait pas confirmer la commande', async () => {
+      await join()
+      // La clôture s'exécute juste après que le service ait lu le paiement et jugé qu'il était dans les temps.
+      const readPayment = paymentStore.findById.bind(paymentStore)
+      paymentStore.findById = async (id) => {
+        const record = await readPayment(id)
+        groups.groupOrders[0]!.status = 'CLOSED'
+        return record
+      }
+
+      const outcome = await payments.handleEvent(event())
+
+      expect(outcome).toBe('late')
+      expect(groups.orderItems[0]!.status).toBe('CANCELLED')
+      expect(publisher.published.map((p) => p.event)).toEqual(['orderItem:updated'])
     })
   })
 

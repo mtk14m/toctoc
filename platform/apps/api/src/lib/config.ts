@@ -36,6 +36,9 @@ const envSchema = z
     PAYMENT_PROVIDER: z.enum(['fake']).default('fake'),
     // Secret de signature des webhooks de paiement : seul l'opérateur (et nous) le connaît.
     PAYMENT_WEBHOOK_SECRET: z.string().min(32).optional(),
+    // Canal d'envoi du récap au partenaire. Seul 'console' existe pour l'instant (le récap est écrit
+    // dans les logs, l'équipe le transmet à la main) ; 'whatsapp' et 'sms' viendront avec leur fournisseur.
+    PARTNER_NOTIFICATION: z.enum(['console']).default('console'),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== 'production') return
@@ -58,6 +61,7 @@ export interface Config {
   trustProxy: boolean
   paymentProvider: 'fake'
   paymentWebhookSecret: string
+  partnerNotification: 'console'
 }
 
 /**
@@ -88,5 +92,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustProxy: parsed.data.TRUST_PROXY,
     paymentProvider: parsed.data.PAYMENT_PROVIDER,
     paymentWebhookSecret: parsed.data.PAYMENT_WEBHOOK_SECRET ?? DEV_PAYMENT_WEBHOOK_SECRET,
+    partnerNotification: parsed.data.PARTNER_NOTIFICATION,
   }
 }
