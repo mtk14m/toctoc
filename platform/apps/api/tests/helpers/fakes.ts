@@ -12,6 +12,14 @@ import type {
 import type { GroupOrderStatus } from '../../src/generated/prisma/enums.js'
 import type { OtpRecord, OtpSender, OtpStore } from '../../src/services/otp.js'
 import type {
+  AddOrderItemResult,
+  JoinableGroupOrder,
+  JoinableMenuItem,
+  NewOrderItem,
+  OrderItemStore,
+} from '../../src/services/order-item.js'
+import type { OrderItemPrice } from '../../src/services/pricing.js'
+import type {
   MenuItemRecord,
   NewMenuItem,
   NewPartner,
@@ -97,12 +105,25 @@ export class InMemoryUserStore implements UserStore {
     this.users.push(user)
     return user
   }
+
+  async findOrCreateByPhone(input: { phone: string; name: string }): Promise<AuthUser> {
+    return (await this.findByPhone(input.phone)) ?? this.create(input)
+  }
 }
 
 export class InMemoryGroupOrderStore implements GroupOrderStore {
   partners: PartnerSummary[] = []
   menuItems: Array<MenuEntry & { partnerId: string; availableDate: Date; active: boolean }> = []
-  orderItems: Array<OrderItemEntry & { groupOrderId: string }> = []
+  /** Les champs financiers et `userId` ne sont renseignés que par les commandes créées via `join`. */
+  orderItems: Array<
+    OrderItemEntry & {
+      groupOrderId: string
+      userId?: string
+      unitPrice?: number
+      deliveryFee?: number
+      commissionAmount?: number
+    }
+  > = []
   groupOrders: Array<NewGroupOrder & { id: string; status: GroupOrderStatus }> = []
   private sequence = 0
 
@@ -207,8 +228,87 @@ export class InMemoryPartnerStore implements PartnerStore {
   }
 }
 
+/**
+ * Les commandes partagent l'état du store des liens : une commande créée par `join` apparaît
+ * ensuite sur la page publique du lien, comme en base.
+ */
+export class InMemoryOrderItemStore implements OrderItemStore {
+  /** Taux de commission par partenaire ; 15 % par défaut, comme le schéma Prisma. */
+  commissionRates = new Map<string, number>()
+  private sequence = 0
+
+  constructor(
+    private readonly groups: InMemoryGroupOrderStore,
+    private readonly users: InMemoryUserStore,
+  ) {}
+
+  async findGroupOrderForJoin(shareToken: string): Promise<JoinableGroupOrder | null> {
+    const order = this.groups.groupOrders.find((o) => o.shareToken === shareToken)
+    if (!order) return null
+
+    return {
+      id: order.id,
+      status: order.status,
+      orderCutoffTime: order.orderCutoffTime,
+      deliveryTime: order.deliveryTime,
+      partner: {
+        id: order.partnerId,
+        commissionRate: this.commissionRates.get(order.partnerId) ?? 0.15,
+      },
+    }
+  }
+
+  async findMenuItem(id: string): Promise<JoinableMenuItem | null> {
+    const item = this.groups.menuItems.find((m) => m.id === id)
+    if (!item) return null
+
+    const { partnerId, name, price, active, availableDate } = item
+    return { id, partnerId, name, price, active, availableDate }
+  }
+
+  /** Sans `await` entre la lecture et l'écriture : atomique, comme le verrou de la version Prisma. */
+  async addOrderItem(
+    input: NewOrderItem,
+    pricer: (existingActiveOrderItems: number) => OrderItemPrice,
+  ): Promise<AddOrderItemResult> {
+    const order = this.groups.groupOrders.find((o) => o.id === input.groupOrderId)
+    if (!order || order.status !== 'OPEN') return { status: 'closed' }
+
+    const active = this.groups.orderItems.filter(
+      (i) => i.groupOrderId === input.groupOrderId && i.status !== 'CANCELLED',
+    )
+    if (active.some((i) => i.userId === input.userId)) return { status: 'already_joined' }
+
+    const price = pricer(active.length)
+    const user = this.users.users.find((u) => u.id === input.userId)
+    const menuItem = this.groups.menuItems.find((m) => m.id === input.menuItemId)
+    if (!user || !menuItem) throw new Error('Données de test incohérentes')
+
+    this.sequence += 1
+    const item = {
+      id: `item_${this.sequence}`,
+      groupOrderId: input.groupOrderId,
+      userId: input.userId,
+      participantName: user.name,
+      menuItemName: menuItem.name,
+      quantity: input.quantity,
+      status: 'PENDING_PAYMENT' as const,
+      unitPrice: price.unitPrice,
+      deliveryFee: price.deliveryFee,
+      commissionAmount: price.commissionAmount,
+    }
+    this.groups.orderItems.push(item)
+    return { status: 'created', item: { id: item.id, status: item.status }, price }
+  }
+}
+
 export class InMemoryRateLimiter implements RateLimiter {
   private counts = new Map<string, number>()
+
+  /** Les clés utilisées jusqu'ici : permet de vérifier ce qui est compté (par téléphone, par IP...). */
+  get keys(): string[] {
+    return [...this.counts.keys()]
+  }
 
   async hit(key: string): Promise<number> {
     const count = (this.counts.get(key) ?? 0) + 1
@@ -235,10 +335,12 @@ export class RecordingOtpSender implements OtpSender {
 
 export function createTestDeps() {
   const userStore = new InMemoryUserStore()
+  const groupOrderStore = new InMemoryGroupOrderStore(userStore)
   return {
     otpStore: new InMemoryOtpStore(),
     userStore,
-    groupOrderStore: new InMemoryGroupOrderStore(userStore),
+    groupOrderStore,
+    orderItemStore: new InMemoryOrderItemStore(groupOrderStore, userStore),
     partnerStore: new InMemoryPartnerStore(),
     rateLimiter: new InMemoryRateLimiter(),
     otpSender: new RecordingOtpSender(),

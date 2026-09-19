@@ -1,6 +1,7 @@
 import type { RateLimiter } from './lib/rate-limiter.js'
 import type { UserStore } from './services/auth.js'
 import type { GroupOrderStore } from './services/group-order.js'
+import type { OrderItemStore } from './services/order-item.js'
 import type { OtpSender, OtpStore } from './services/otp.js'
 import type { PartnerStore } from './services/partner.js'
 
@@ -13,6 +14,7 @@ export interface AppDeps {
   otpStore: OtpStore
   userStore: UserStore
   groupOrderStore: GroupOrderStore
+  orderItemStore: OrderItemStore
   partnerStore: PartnerStore
   rateLimiter: RateLimiter
   otpSender: OtpSender

@@ -17,4 +17,9 @@ export class PrismaUserStore implements UserStore {
   create(input: { phone: string; name: string }): Promise<AuthUser> {
     return this.db.user.create({ data: input, select })
   }
+
+  findOrCreateByPhone({ phone, name }: { phone: string; name: string }): Promise<AuthUser> {
+    // `update` vide : un compte existant garde son nom, et l'unicité de `phone` rend l'appel atomique.
+    return this.db.user.upsert({ where: { phone }, update: {}, create: { phone, name }, select })
+  }
 }
