@@ -9,6 +9,7 @@ describe('loadConfig', () => {
       nodeEnv: 'development',
       port: 3000,
       redisUrl: 'redis://localhost:6380',
+      databaseUrl: 'postgresql://toctoc:toctoc@localhost:5433/toctoc',
       corsOrigins: ['http://localhost:5173'],
     })
   })
@@ -34,5 +35,12 @@ describe('loadConfig', () => {
 
   it('refuse un REDIS_URL qui n’est pas une URL', () => {
     expect(() => loadConfig({ REDIS_URL: 'pas-une-url' })).toThrow(/REDIS_URL/)
+  })
+
+  it('lit DATABASE_URL et refuse une valeur qui n’est pas une URL', () => {
+    const url = 'postgresql://user:pass@db.example:5432/toctoc'
+
+    expect(loadConfig({ DATABASE_URL: url }).databaseUrl).toBe(url)
+    expect(() => loadConfig({ DATABASE_URL: 'pas-une-url' })).toThrow(/DATABASE_URL/)
   })
 })

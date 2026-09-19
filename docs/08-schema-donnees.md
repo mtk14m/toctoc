@@ -57,7 +57,7 @@ erDiagram
         string id PK
         string partnerId FK
         string name
-        float price
+        int price
         date availableDate
         boolean active
     }
@@ -79,15 +79,15 @@ erDiagram
         string userId FK
         string menuItemId FK
         int quantity
-        float unitPrice
-        float deliveryFee
-        float commissionAmount
+        int unitPrice
+        int deliveryFee
+        int commissionAmount
         OrderItemStatus status
     }
     Payment {
         string id PK
         string orderItemId FK
-        float amount
+        int amount
         string currency
         PaymentProvider provider
         PaymentStatus status
@@ -132,7 +132,7 @@ erDiagram
         string partnerId FK
         string driverId FK
         string userId FK
-        float amount
+        int amount
         string currency
         datetime periodStart
         datetime periodEnd
@@ -272,7 +272,7 @@ model MenuItem {
   partner       Partner     @relation(fields: [partnerId], references: [id])
   name          String
   description   String?
-  price         Float
+  price         Int
   photoUrl      String?
   availableDate DateTime    @db.Date
   active        Boolean     @default(true)
@@ -311,9 +311,9 @@ model OrderItem {
   menuItemId   String
   menuItem     MenuItem        @relation(fields: [menuItemId], references: [id])
   quantity         Int             @default(1)
-  unitPrice        Float           // copié depuis MenuItem.price au moment de la commande — ne bouge plus si le prix change ensuite
-  deliveryFee      Float           // fixé au rang de cette commande sur le lien au moment où elle est créée (palier dégressif) — jamais recalculé après coup, voir 04-modele-economique.md
-  commissionAmount Float           // copié depuis Partner.commissionRate × unitPrice × quantity au moment de la commande — si le partenaire renégocie son taux ensuite, l'historique ne bouge pas
+  unitPrice        Int           // copié depuis MenuItem.price au moment de la commande — ne bouge plus si le prix change ensuite
+  deliveryFee      Int           // fixé au rang de cette commande sur le lien au moment où elle est créée (palier dégressif) — jamais recalculé après coup, voir 04-modele-economique.md
+  commissionAmount Int           // copié depuis Partner.commissionRate × unitPrice × quantity au moment de la commande — si le partenaire renégocie son taux ensuite, l'historique ne bouge pas
   status       OrderItemStatus @default(PENDING_PAYMENT)
   createdAt    DateTime        @default(now())
   payment      Payment?
@@ -342,7 +342,7 @@ model Payment {
   id                    String          @id @default(cuid())
   orderItemId           String          @unique
   orderItem             OrderItem       @relation(fields: [orderItemId], references: [id])
-  amount                Float
+  amount                Int
   currency              String          @default("GNF") // figé par paiement — la Guinée n'est pas en zone XOF comme les 3 autres pays cibles, voir 01-marche-et-concurrence.md
   provider              PaymentProvider
   providerTransactionId String?
@@ -407,7 +407,7 @@ model Payout {
   driver                Driver?                @relation("DriverPayouts", fields: [driverId], references: [id])
   userId                String?                // relais — c'est un User, pas un Partner ni un Driver
   user                  User?                  @relation("RelaisPayouts", fields: [userId], references: [id])
-  amount                Float
+  amount                Int
   currency              String                 @default("GNF")
   periodStart           DateTime
   periodEnd             DateTime
@@ -436,6 +436,8 @@ model AuditLog {
 
 ## Notes de conception
 
+- **Source de vérité : `platform/apps/api/prisma/schema.prisma`.** Le bloc ci-dessus est le raisonnement de conception ; en cas d'écart, c'est le fichier du dépôt qui fait foi. Écarts déjà assumés : Prisma 7 (l'URL de la base vit dans `prisma.config.ts`, plus dans le schéma), un index sur `Payment.providerTransactionId` (le webhook mobile money retrouve le paiement par cette référence), et des index sur `GroupOrder.creatorId`, `OrderItem.userId` et `Delivery(driverId, status)`.
+- **Tous les montants sont des `Int`, jamais des `Float` (décidé au démarrage du développement).** Le GNF n'a pas de sous-unité, et `Float` accumule des erreurs d'arrondi dès qu'on additionne des paiements (un `Payout` agrégé sur une semaine ne doit jamais avoir un franc d'écart avec la somme des `Payment`). Seuls restent en `Float` : `Partner.commissionRate` (un ratio, pas un montant) et les coordonnées GPS. Conséquence à l'implémentation : `commissionAmount = Math.round(unitPrice × quantity × commissionRate)` — l'arrondi est explicite, à un seul endroit (`services/pricing`), et testé. Un test (`tests/lib/schema.test.ts`) empêche de réintroduire un `Float` monétaire par inadvertance.
 - **`unitPrice` copié sur `OrderItem`** : si le partenaire change son prix le lendemain, les commandes déjà passées ne doivent pas bouger rétroactivement — même logique que `Trip.estimatedPrice` figé dans CityMoov.
 - **`shareToken` sur `GroupOrder`** : c'est littéralement le lien partagé (`toctoc.app/g/{shareToken}`) — généré aléatoirement, pas l'id interne, pour ne pas exposer d'information séquentielle.
 - **Pas de mot de passe sur `User`** : rejoindre par téléphone suffit en Phase 1 (structure d'auth reprise de `routes/auth.ts` dans CityMoov, disponible pour le `relais` qui revient chaque jour) — mais **un participant qui rejoint un lien une seule fois n'a pas besoin de vérifier son OTP TocToc**, voir [06-fonctionnalite-lancement.md](06-fonctionnalite-lancement.md) : son numéro sert uniquement à initier le paiement mobile money, dont l'opérateur fait déjà sa propre vérification (USSD/PIN). Le `User` correspondant peut être créé silencieusement à la première commande, sans étape de vérification bloquante.

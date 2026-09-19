@@ -1,0 +1,294 @@
+// Schéma Phase 1 — voir docs/08-schema-donnees.md pour le raisonnement.
+//
+// Convention argent : tous les montants sont des Int en unité monétaire entière.
+// Le GNF n'a pas de sous-unité, et Float accumule des erreurs d'arrondi sur les sommes.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  CLIENT
+  DRIVER
+  ADMIN_PLATFORM
+}
+
+enum PartnerType {
+  RESTAURANT
+  CUISINE_MAISON
+}
+
+enum GroupOrderStatus {
+  OPEN // encore ouvert, on peut rejoindre
+  CLOSED // heure limite passée, récap envoyé au partenaire
+  IN_DELIVERY // livreur en route
+  DELIVERED
+  CANCELLED
+}
+
+enum OrderItemStatus {
+  PENDING_PAYMENT
+  CONFIRMED // argent réellement encaissé, sans exception — voir Payment.status
+  CANCELLED
+}
+
+enum PaymentProvider {
+  MOBILE_MONEY
+  CASH // jamais utilisé par Payment en Phase 1 — gardé pour Payout (versement en espèces possible)
+}
+
+enum PaymentMode {
+  SPLIT // chacun paie sa propre part — le défaut
+  HOST_PAYS // le créateur du lien paie pour tout le groupe, à l'heure limite
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+enum DeliveryStatus {
+  ASSIGNED
+  PICKED_UP
+  DELIVERED
+}
+
+enum DocumentOwnerType {
+  PARTNER
+  DRIVER
+}
+
+enum DocumentType {
+  ID_CARD // pièce d'identité (Driver)
+  DRIVER_LICENSE // permis de conduire (Driver)
+  VEHICLE_REGISTRATION // carte grise de la moto (Driver)
+  BUSINESS_REGISTRATION // registre de commerce, optionnel (Partner)
+  HEALTH_CERTIFICATE // justificatif d'hygiène si disponible (Partner)
+}
+
+enum PayoutBeneficiaryType {
+  PARTNER
+  DRIVER
+  RELAIS
+}
+
+model User {
+  id                String       @id @default(cuid())
+  phone             String       @unique
+  name              String
+  role              Role         @default(CLIENT)
+  isActive          Boolean      @default(true)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  driver            Driver?
+  createdOrders     GroupOrder[] @relation("GroupOrderCreator")
+  orderItems        OrderItem[]
+  relaisPayouts     Payout[]     @relation("RelaisPayouts") // incitatif versé quand ce User a joué le rôle de relais
+  documentsVerified Document[]   @relation("DocumentVerifier") // documents vérifiés par ce compte ADMIN_PLATFORM
+  auditLogs         AuditLog[]   @relation("AuditActor")
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  phone     String
+  code      String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+}
+
+model Partner {
+  id                         String       @id @default(cuid())
+  name                       String
+  type                       PartnerType
+  phone                      String
+  address                    String
+  city                       String
+  commissionRate             Float        @default(0.15) // ratio par partenaire, pas codé en dur
+  businessRegistrationNumber String? // optionnel : beaucoup de cuisinières n'en ont pas
+  verifiedAt                 DateTime?
+  active                     Boolean      @default(true)
+  createdAt                  DateTime     @default(now())
+  menuItems                  MenuItem[]
+  groupOrders                GroupOrder[]
+  documents                  Document[]   @relation("PartnerDocuments")
+  payouts                    Payout[]     @relation("PartnerPayouts")
+  ratings                    Rating[]
+}
+
+model MenuItem {
+  id            String      @id @default(cuid())
+  partnerId     String
+  partner       Partner     @relation(fields: [partnerId], references: [id])
+  name          String
+  description   String?
+  price         Int // en GNF entiers
+  photoUrl      String?
+  availableDate DateTime    @db.Date
+  active        Boolean     @default(true)
+  orderItems    OrderItem[]
+
+  @@index([partnerId, availableDate])
+}
+
+model GroupOrder {
+  id              String           @id @default(cuid())
+  creatorId       String
+  creator         User             @relation("GroupOrderCreator", fields: [creatorId], references: [id])
+  partnerId       String
+  partner         Partner          @relation(fields: [partnerId], references: [id])
+  shareToken      String           @unique
+  deliveryAddress String
+  deliveryLat     Float?
+  deliveryLng     Float?
+  orderCutoffTime DateTime
+  deliveryTime    DateTime
+  paymentMode     PaymentMode      @default(SPLIT) // figé à la création
+  status          GroupOrderStatus @default(OPEN)
+  createdAt       DateTime         @default(now())
+  orderItems      OrderItem[]
+  delivery        Delivery?
+
+  @@index([status, orderCutoffTime])
+  @@index([creatorId])
+}
+
+model OrderItem {
+  id               String          @id @default(cuid())
+  groupOrderId     String
+  groupOrder       GroupOrder      @relation(fields: [groupOrderId], references: [id])
+  userId           String
+  user             User            @relation(fields: [userId], references: [id])
+  menuItemId       String
+  menuItem         MenuItem        @relation(fields: [menuItemId], references: [id])
+  quantity         Int             @default(1)
+  unitPrice        Int // copié depuis MenuItem.price à la commande — ne bouge plus ensuite
+  deliveryFee      Int // figé au rang de la commande sur le lien (palier dégressif), jamais recalculé
+  commissionAmount Int // Partner.commissionRate × unitPrice × quantity, figé à la commande
+  status           OrderItemStatus @default(PENDING_PAYMENT)
+  createdAt        DateTime        @default(now())
+  payment          Payment?
+  rating           Rating?
+
+  @@index([groupOrderId])
+  @@index([userId])
+}
+
+// Un score, pas un avis à modérer. partnerId est dupliqué depuis OrderItem → GroupOrder
+// pour calculer une moyenne sans remonter trois relations (dénormalisation assumée).
+model Rating {
+  id          String    @id @default(cuid())
+  orderItemId String    @unique
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
+  partnerId   String
+  partner     Partner   @relation(fields: [partnerId], references: [id])
+  score       Int // 1 à 5
+  createdAt   DateTime  @default(now())
+
+  @@index([partnerId])
+}
+
+model Payment {
+  id                    String          @id @default(cuid())
+  orderItemId           String          @unique
+  orderItem             OrderItem       @relation(fields: [orderItemId], references: [id])
+  amount                Int // (unitPrice × quantity) + deliveryFee
+  currency              String          @default("GNF") // figé par paiement : la Guinée n'est pas en zone XOF
+  provider              PaymentProvider
+  providerTransactionId String? // partagé entre plusieurs Payment en mode HOST_PAYS
+  status                PaymentStatus   @default(PENDING)
+  paidAt                DateTime?
+  createdAt             DateTime        @default(now())
+
+  @@index([providerTransactionId])
+}
+
+model Driver {
+  id         String     @id @default(cuid())
+  userId     String     @unique
+  user       User       @relation(fields: [userId], references: [id])
+  active     Boolean    @default(true)
+  deliveries Delivery[]
+  documents  Document[] @relation("DriverDocuments")
+  payouts    Payout[]   @relation("DriverPayouts")
+}
+
+model Delivery {
+  id                   String         @id @default(cuid())
+  groupOrderId         String         @unique
+  groupOrder           GroupOrder     @relation(fields: [groupOrderId], references: [id])
+  driverId             String?
+  driver               Driver?        @relation(fields: [driverId], references: [id])
+  status               DeliveryStatus @default(ASSIGNED)
+  confirmationCode     String? // généré au passage à PICKED_UP, jamais avant
+  confirmationAttempts Int            @default(0) // plafonné à 5 côté application
+  pickedUpAt           DateTime?
+  deliveredAt          DateTime?
+  deliveredByOverride  Boolean        @default(false) // confirmation manuelle ADMIN_PLATFORM, toujours avec AuditLog
+
+  @@index([driverId, status])
+}
+
+model Document {
+  id           String            @id @default(cuid())
+  ownerType    DocumentOwnerType
+  partnerId    String?
+  partner      Partner?          @relation("PartnerDocuments", fields: [partnerId], references: [id])
+  driverId     String?
+  driver       Driver?           @relation("DriverDocuments", fields: [driverId], references: [id])
+  type         DocumentType
+  url          String
+  verified     Boolean           @default(false)
+  verifiedAt   DateTime?
+  verifiedById String?
+  verifiedBy   User?             @relation("DocumentVerifier", fields: [verifiedById], references: [id])
+  createdAt    DateTime          @default(now())
+
+  @@index([ownerType, partnerId])
+  @@index([ownerType, driverId])
+}
+
+// Ce que TocToc verse à un tiers — pendant sortant de Payment. Agrégé par période :
+// le détail se recalcule depuis OrderItem/Delivery.
+model Payout {
+  id                    String                @id @default(cuid())
+  beneficiaryType       PayoutBeneficiaryType
+  partnerId             String?
+  partner               Partner?              @relation("PartnerPayouts", fields: [partnerId], references: [id])
+  driverId              String?
+  driver                Driver?               @relation("DriverPayouts", fields: [driverId], references: [id])
+  userId                String? // relais : c'est un User, pas un Partner ni un Driver
+  user                  User?                 @relation("RelaisPayouts", fields: [userId], references: [id])
+  amount                Int
+  currency              String                @default("GNF")
+  periodStart           DateTime
+  periodEnd             DateTime
+  provider              PaymentProvider
+  providerTransactionId String?
+  status                PaymentStatus         @default(PENDING)
+  paidAt                DateTime?
+  createdAt             DateTime              @default(now())
+
+  @@index([beneficiaryType, status])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String
+  actor      User     @relation("AuditActor", fields: [actorId], references: [id])
+  action     String // ex. "document.verified", "delivery.manual_override"
+  targetType String // ex. "Document", "Delivery", "OrderItem"
+  targetId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId])
+}

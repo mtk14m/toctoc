@@ -9,6 +9,7 @@ Le pourquoi des choix est dans [`../docs`](../docs/README.md), notamment `07-arc
 pnpm install
 pnpm infra:up                                  # Postgres (5433) + Redis (6380)
 cp apps/api/.env.example apps/api/.env
+pnpm --filter @toctoc/api db:migrate           # applique les migrations Prisma
 pnpm api                                       # http://localhost:3000/health
 ```
 
