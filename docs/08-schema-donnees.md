@@ -239,12 +239,13 @@ model User {
 model OtpCode {
   id        String   @id @default(cuid())
   phone     String
-  code      String
+  codeHash  String   // HMAC du code, jamais le code en clair
+  attempts  Int      @default(0) // essais ratés, le code est bloqué à 5
   expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  @@index([phone])
+  @@index([phone, createdAt])
 }
 
 model Partner {

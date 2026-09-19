@@ -2,12 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../../src/app.js'
 import { loadConfig } from '../../src/lib/config.js'
+import { createTestDeps } from '../helpers/fakes.js'
 
 describe('GET /health', () => {
   let app: FastifyInstance
 
   beforeAll(async () => {
-    app = await buildApp(loadConfig({ NODE_ENV: 'test' }))
+    app = await buildApp(loadConfig({ NODE_ENV: 'test' }), createTestDeps())
   })
 
   afterAll(async () => {

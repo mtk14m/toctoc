@@ -14,6 +14,8 @@ export function registerErrorHandling(app: FastifyInstance): void {
 
   app.setErrorHandler((error, req, reply) => {
     if (error instanceof AppError) {
+      // Une erreur serveur voulue (ex. fournisseur d'envoi en panne) garde sa cause dans les logs.
+      if (error.statusCode >= 500) req.log.error({ err: error }, error.code)
       return reply.status(error.statusCode).send(fail(error.code, error.message, error.details))
     }
 

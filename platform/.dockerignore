@@ -1,0 +1,17 @@
+# Le contexte de build est platform/ : on n'y envoie que le nécessaire.
+**/node_modules
+**/dist
+**/coverage
+**/.env
+**/.env.*
+!**/.env.example
+
+# Le client Prisma est généré dans l'image, jamais copié depuis la machine
+**/src/generated
+
+# Inutiles pour construire l'image
+**/tests
+infra
+.git
+*.md
+.DS_Store
