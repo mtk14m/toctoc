@@ -10,6 +10,8 @@ import type { OtpSender, OtpStore } from './services/otp.js'
 import type { PartnerNotifier } from './services/partner-notifier.js'
 import type { PartnerStore } from './services/partner.js'
 import type { PaymentGateway, PaymentStore } from './services/payment.js'
+import type { RatingStore } from './services/rating.js'
+import type { RefundStore } from './services/refund.js'
 import type { RestaurantStore } from './services/restaurant.js'
 
 /**
@@ -26,6 +28,8 @@ export interface AppDeps {
   restaurantStore: RestaurantStore
   deliveryStore: DeliveryStore
   driverStore: DriverStore
+  ratingStore: RatingStore
+  refundStore: RefundStore
   paymentStore: PaymentStore
   paymentGateway: PaymentGateway
   closingStore: ClosingStore

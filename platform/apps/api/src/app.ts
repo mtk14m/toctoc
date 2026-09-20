@@ -14,6 +14,8 @@ import { healthRoutes } from './routes/health.js'
 import { adminDeliveryRoutes, driverRoutes } from './routes/deliveries.js'
 import { orderItemRoutes } from './routes/order-items.js'
 import { adminPartnerRoutes } from './routes/partners.js'
+import { ratingRoutes } from './routes/ratings.js'
+import { adminRefundRoutes } from './routes/refunds.js'
 import { restaurantRoutes } from './routes/restaurants.js'
 import { webhookRoutes } from './routes/webhooks.js'
 import { createAuthService } from './services/auth.js'
@@ -25,6 +27,8 @@ import { createOrderItemService } from './services/order-item.js'
 import { createOtpService } from './services/otp.js'
 import { createPartnerService } from './services/partner.js'
 import { createPaymentService } from './services/payment.js'
+import { createRatingService } from './services/rating.js'
+import { createRefundService } from './services/refund.js'
 import { createRestaurantService } from './services/restaurant.js'
 
 declare module 'fastify' {
@@ -120,6 +124,13 @@ export async function buildApp(config: Config, deps: AppDeps) {
     rateLimiter: deps.rateLimiter,
     defaultCountryCode: config.defaultCountryCode,
   })
+  const ratings = createRatingService({
+    store: deps.ratingStore,
+    realtime,
+    rateLimiter: deps.rateLimiter,
+    defaultCountryCode: config.defaultCountryCode,
+  })
+  const refunds = createRefundService({ store: deps.refundStore })
   const restaurants = createRestaurantService({
     store: deps.restaurantStore,
     rules: config.schedule,
@@ -140,8 +151,10 @@ export async function buildApp(config: Config, deps: AppDeps) {
   })
   await app.register(groupOrderRoutes, { prefix: '/group-orders', groupOrders })
   await app.register(orderItemRoutes, { prefix: '/group-orders', orderItems })
+  await app.register(ratingRoutes, { prefix: '/order-items', ratings })
   await app.register(restaurantRoutes, { prefix: '/restaurants', restaurants })
   await app.register(adminPartnerRoutes, { prefix: '/admin', partners })
+  await app.register(adminRefundRoutes, { prefix: '/admin', refunds })
   await app.register(adminDeliveryRoutes, { prefix: '/admin', deliveries, drivers })
   await app.register(driverRoutes, { prefix: '/driver', deliveries, drivers })
   await app.register(webhookRoutes, { prefix: '/webhooks', payments })

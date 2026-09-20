@@ -394,6 +394,21 @@ describe('GroupOrderService', () => {
       expect(menu.map((m) => m.id)).not.toContain('menu_demain')
     })
 
+    describe('rating — la moyenne du jour, une fois livrée', () => {
+      it('est absente tant que personne n’a noté', async () => {
+        expect((await service.getByShareToken(shareToken)).rating).toBeNull()
+      })
+
+      it('donne la moyenne et le nombre de notes de la commande', async () => {
+        store.ratingOf = () => ({ average: 4.5, count: 2 })
+
+        expect((await service.getByShareToken(shareToken)).rating).toEqual({
+          average: 4.5,
+          count: 2,
+        })
+      })
+    })
+
     describe('delivery — la preuve de livraison sur la page du groupe', () => {
       const stored = (status: 'ASSIGNED' | 'PICKED_UP' | 'DELIVERED', code: string | null) => {
         store.deliveryOf = () => ({ status, confirmationCode: code })

@@ -286,6 +286,12 @@ describe('DeliveryService', () => {
           event: 'groupOrder:delivered',
           payload: { deliveredAt: '2026-09-21T11:10:00.000Z' },
         },
+        // c'est le moment de noter : la page propose de noter le restaurant (docs/09 §4)
+        {
+          room: 'groupOrder:group_1',
+          event: 'groupOrder:rating_open',
+          payload: { restaurantName: 'Chez Aïssatou' },
+        },
       ])
     })
 
@@ -387,7 +393,10 @@ describe('DeliveryService', () => {
           metadata: { reason: 'Le relais est injoignable, livraison confirmée par téléphone' },
         },
       ])
-      expect(publisher.published.map((p) => p.event)).toEqual(['groupOrder:delivered'])
+      expect(publisher.published.map((p) => p.event)).toEqual([
+        'groupOrder:delivered',
+        'groupOrder:rating_open',
+      ])
     })
 
     it('marche aussi quand le livreur est verrouillé après 5 essais ratés', async () => {

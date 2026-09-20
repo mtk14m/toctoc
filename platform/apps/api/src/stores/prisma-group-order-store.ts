@@ -7,6 +7,7 @@ import type {
   OrderItemEntry,
   PartnerSummary,
 } from '../services/group-order.js'
+import { ratingSummaryOfOrder } from './rating-summary.js'
 
 export class PrismaGroupOrderStore implements GroupOrderStore {
   constructor(private readonly db: PrismaClient) {}
@@ -55,7 +56,11 @@ export class PrismaGroupOrderStore implements GroupOrderStore {
     if (!order) return null
 
     const { creator, ...rest } = order
-    return { ...rest, creatorName: creator.name }
+    return {
+      ...rest,
+      creatorName: creator.name,
+      rating: await ratingSummaryOfOrder(this.db, order.id),
+    }
   }
 
   listMenu(partnerId: string, date: Date): Promise<MenuEntry[]> {

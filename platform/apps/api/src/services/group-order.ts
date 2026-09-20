@@ -10,6 +10,7 @@ import { AppError } from '../lib/errors.js'
 import { isValidPhone, normalizePhone } from '../lib/phone.js'
 import type { RateLimiter } from '../lib/rate-limiter.js'
 import { redisKeys } from '../lib/redis-keys.js'
+import { roundAverage } from '../lib/round-average.js'
 import { utcDay } from '../lib/utc-day.js'
 import type { Participant } from '../realtime/events.js'
 import type { UserStore } from './auth.js'
@@ -55,6 +56,8 @@ export interface GroupOrderRecord {
   partner: { id: string; name: string; type: PartnerType }
   /** L'état de la livraison, s'il y en a une. */
   delivery: { status: DeliveryStatus; confirmationCode: string | null } | null
+  /** La moyenne des notes données à cette commande ; `null` tant que personne n'a noté. */
+  rating: { average: number; count: number } | null
 }
 
 export interface MenuEntry {
@@ -254,6 +257,10 @@ export function createGroupOrderService(deps: GroupOrderServiceDeps) {
           status: order.delivery.status,
           confirmationCode:
             order.delivery.status === 'PICKED_UP' ? order.delivery.confirmationCode : null,
+        },
+        rating: order.rating && {
+          average: roundAverage(order.rating.average),
+          count: order.rating.count,
         },
         menu,
         participants: visible.map((item): Participant => ({

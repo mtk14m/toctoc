@@ -48,6 +48,10 @@ export interface ServerToClientEvents {
   }) => void
   /** Room du lien. Le code a été saisi (ou l'équipe a confirmé) : la commande est livrée. */
   'groupOrder:delivered': (payload: { deliveredAt: string }) => void
+  /** Room du lien. La commande est livrée : la page propose de noter le restaurant. */
+  'groupOrder:rating_open': (payload: { restaurantName: string }) => void
+  /** Room du lien. Quelqu'un a noté : la moyenne du jour, mise à jour pour tout le monde. */
+  'groupOrder:rating_added': (payload: { average: number; count: number }) => void
   /** Room de la commande : le message privé de la personne qui a commandé, jamais celui du groupe. */
   'orderItem:updated': (payload: {
     orderItemId: string

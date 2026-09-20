@@ -74,7 +74,7 @@ export type AttemptResult =
   | { status: 'not_found' }
 
 export type OverrideResult =
-  | { status: 'overridden'; groupOrderId: string }
+  | { status: 'overridden'; groupOrderId: string; restaurantName: string }
   | { status: 'not_found' }
   | { status: 'already_delivered' }
 
@@ -108,7 +108,10 @@ export interface DeliveryStore {
    */
   registerAttempt(input: { deliveryId: string; driverId: string }): Promise<AttemptResult>
   /** PICKED_UP → DELIVERED, la commande passe DELIVERED. `null` si ce n'est plus possible. */
-  complete(input: { deliveryId: string; at: Date }): Promise<{ groupOrderId: string } | null>
+  complete(input: {
+    deliveryId: string
+    at: Date
+  }): Promise<{ groupOrderId: string; restaurantName: string } | null>
   /**
    * Confirmation manuelle par l'équipe : DELIVERED avec `deliveredByOverride`, et **toujours** une
    * entrée `delivery.manual_override` dans le journal d'audit, dans la même transaction.
@@ -179,6 +182,16 @@ export function createDeliveryService(deps: DeliveryServiceDeps) {
     } catch (error) {
       onError(error)
     }
+  }
+
+  /** Livrée : le groupe l'apprend, et la page propose aussitôt de noter le restaurant (docs/09 §4). */
+  function announceDelivered(groupOrderId: string, restaurantName: string, at: Date) {
+    announce(() => {
+      realtime.publish(groupOrderRoom(groupOrderId), 'groupOrder:delivered', {
+        deliveredAt: at.toISOString(),
+      })
+      realtime.publish(groupOrderRoom(groupOrderId), 'groupOrder:rating_open', { restaurantName })
+    })
   }
 
   return {
@@ -270,11 +283,7 @@ export function createDeliveryService(deps: DeliveryServiceDeps) {
       const completed = await store.complete({ deliveryId, at })
       if (!completed) throw invalidState()
 
-      announce(() =>
-        realtime.publish(groupOrderRoom(completed.groupOrderId), 'groupOrder:delivered', {
-          deliveredAt: at.toISOString(),
-        }),
-      )
+      announceDelivered(completed.groupOrderId, completed.restaurantName, at)
       return { status: 'DELIVERED' as const }
     },
 
@@ -290,11 +299,7 @@ export function createDeliveryService(deps: DeliveryServiceDeps) {
         throw new AppError(409, 'DELIVERY_ALREADY_DELIVERED', 'Cette livraison est déjà confirmée')
       }
 
-      announce(() =>
-        realtime.publish(groupOrderRoom(result.groupOrderId), 'groupOrder:delivered', {
-          deliveredAt: at.toISOString(),
-        }),
-      )
+      announceDelivered(result.groupOrderId, result.restaurantName, at)
       return { status: 'DELIVERED' as const, deliveredByOverride: true as const }
     },
 

@@ -30,6 +30,8 @@ import type {
 import type { CloseResult, ClosingStore, RecapCandidate } from '../../src/services/closing.js'
 import type { PartnerNotifier } from '../../src/services/partner-notifier.js'
 import type { RestaurantRecord, RestaurantStore } from '../../src/services/restaurant.js'
+import type { RatableOrderItem, RatingStore, RatingSummary } from '../../src/services/rating.js'
+import type { RefundMarkResult, RefundRecord, RefundStore } from '../../src/services/refund.js'
 import {
   MAX_CONFIRMATION_ATTEMPTS,
   type AssignResult,
@@ -160,6 +162,8 @@ export class InMemoryGroupOrderStore implements GroupOrderStore {
     NewGroupOrder & { id: string; status: GroupOrderStatus; partnerNotifiedAt?: Date | null }
   > = []
   private sequence = 0
+  /** Relié au store des notes par `createTestDeps` : la page du groupe lit la moyenne de la commande. */
+  ratingOf: (groupOrderId: string) => { average: number; count: number } | null = () => null
   /** Relié au store de livraison par `createTestDeps` : la page du groupe lit l'état de la livraison. */
   deliveryOf: (
     groupOrderId: string,
@@ -198,6 +202,7 @@ export class InMemoryGroupOrderStore implements GroupOrderStore {
       creatorName: creator.name,
       partner: { id: partner.id, name: partner.name, type: partner.type },
       delivery: this.deliveryOf(order.id),
+      rating: this.ratingOf(order.id),
     }
   }
 
@@ -287,7 +292,10 @@ export class InMemoryRestaurantStore implements RestaurantStore {
   /** Note moyenne et nombre de notes par restaurant (le modèle Rating n'a pas encore de route). */
   ratings = new Map<string, { average: number; count: number }>()
 
-  constructor(private readonly partners: InMemoryPartnerStore) {}
+  constructor(
+    private readonly partners: InMemoryPartnerStore,
+    private readonly ratingStore?: InMemoryRatingStore,
+  ) {}
 
   async listActive(): Promise<RestaurantRecord[]> {
     return this.partners.partners.filter((p) => p.active).map(toRestaurantRecord)
@@ -299,7 +307,19 @@ export class InMemoryRestaurantStore implements RestaurantStore {
   }
 
   async ratingsFor(partnerIds: string[]): Promise<Map<string, { average: number; count: number }>> {
-    return new Map([...this.ratings].filter(([id]) => partnerIds.includes(id)))
+    const result = new Map([...this.ratings].filter(([id]) => partnerIds.includes(id)))
+    for (const partnerId of partnerIds) {
+      const scores = (this.ratingStore?.ratings ?? [])
+        .filter((r) => r.partnerId === partnerId)
+        .map((r) => r.score)
+      if (scores.length > 0) {
+        result.set(partnerId, {
+          average: scores.reduce((a, b) => a + b, 0) / scores.length,
+          count: scores.length,
+        })
+      }
+    }
+    return result
   }
 
   async menuOn(partnerIds: string[], date: Date): Promise<Map<string, MenuEntry[]>> {
@@ -707,17 +727,25 @@ export class InMemoryDeliveryStore implements DeliveryStore, DriverStore {
     }
   }
 
+  private restaurantNameOf(groupOrderId: string): string {
+    const order = this.groups.groupOrders.find((o) => o.id === groupOrderId)!
+    return this.groups.partners.find((p) => p.id === order.partnerId)!.name
+  }
+
   async complete(input: {
     deliveryId: string
     at: Date
-  }): Promise<{ groupOrderId: string } | null> {
+  }): Promise<{ groupOrderId: string; restaurantName: string } | null> {
     const delivery = this.deliveries.find((d) => d.id === input.deliveryId)
     if (!delivery || delivery.status !== 'PICKED_UP') return null
 
     delivery.status = 'DELIVERED'
     delivery.deliveredAt = input.at
     this.groups.groupOrders.find((o) => o.id === delivery.groupOrderId)!.status = 'DELIVERED'
-    return { groupOrderId: delivery.groupOrderId }
+    return {
+      groupOrderId: delivery.groupOrderId,
+      restaurantName: this.restaurantNameOf(delivery.groupOrderId),
+    }
   }
 
   async override(input: {
@@ -742,7 +770,11 @@ export class InMemoryDeliveryStore implements DeliveryStore, DriverStore {
       targetId: delivery.id,
       metadata: { reason: input.reason },
     })
-    return { status: 'overridden', groupOrderId: delivery.groupOrderId }
+    return {
+      status: 'overridden',
+      groupOrderId: delivery.groupOrderId,
+      restaurantName: this.restaurantNameOf(delivery.groupOrderId),
+    }
   }
 
   async listOrders(statuses: OrderStatus[]): Promise<OpsOrderRecord[]> {
@@ -770,6 +802,124 @@ export class InMemoryDeliveryStore implements DeliveryStore, DriverStore {
             : null,
         }
       })
+  }
+}
+
+/** Les notes, sur l'état partagé des commandes : noter n'est possible qu'une fois livré, comme en base. */
+export class InMemoryRatingStore implements RatingStore {
+  ratings: Array<{ orderItemId: string; partnerId: string; score: number }> = []
+
+  constructor(
+    private readonly groups: InMemoryGroupOrderStore,
+    private readonly users: InMemoryUserStore,
+  ) {}
+
+  async findOrderItemForRating(id: string): Promise<RatableOrderItem | null> {
+    const item = this.groups.orderItems.find((i) => i.id === id)
+    if (!item) return null
+
+    const order = this.groups.groupOrders.find((o) => o.id === item.groupOrderId)!
+    const user = this.users.users.find((u) => u.id === item.userId)
+    if (!user) return null
+
+    return {
+      id: item.id,
+      status: item.status,
+      userPhone: user.phone,
+      groupOrder: { id: order.id, status: order.status, partnerId: order.partnerId },
+    }
+  }
+
+  async create(input: {
+    orderItemId: string
+    partnerId: string
+    score: number
+  }): Promise<'created' | 'already_rated'> {
+    if (this.ratings.some((r) => r.orderItemId === input.orderItemId)) return 'already_rated'
+    this.ratings.push(input)
+    return 'created'
+  }
+
+  async summaryForOrder(groupOrderId: string): Promise<RatingSummary | null> {
+    const scores = this.ratings
+      .filter(
+        (r) =>
+          this.groups.orderItems.find((i) => i.id === r.orderItemId)?.groupOrderId === groupOrderId,
+      )
+      .map((r) => r.score)
+    if (scores.length === 0) return null
+    return { average: scores.reduce((a, b) => a + b, 0) / scores.length, count: scores.length }
+  }
+}
+
+/** Les paiements encaissés sans repas : lit les paiements et les parts, et garde son journal d'audit. */
+export class InMemoryRefundStore implements RefundStore {
+  auditLogs: Array<{
+    actorId: string
+    action: string
+    targetType: string
+    targetId: string
+    metadata: unknown
+  }> = []
+
+  constructor(
+    private readonly groups: InMemoryGroupOrderStore,
+    private readonly users: InMemoryUserStore,
+    private readonly payments: InMemoryPaymentStore,
+  ) {}
+
+  private isRefunded(orderItemId: string): boolean {
+    return this.auditLogs.some(
+      (log) => log.action === 'order_item.refunded' && log.targetId === orderItemId,
+    )
+  }
+
+  async listPending(): Promise<RefundRecord[]> {
+    const records: RefundRecord[] = []
+    for (const payment of this.payments.payments) {
+      const item = this.groups.orderItems.find((i) => i.id === payment.orderItemId)
+      if (!item || item.status !== 'CANCELLED' || payment.status !== 'CONFIRMED') continue
+      if (this.isRefunded(item.id)) continue
+
+      const order = this.groups.groupOrders.find((o) => o.id === item.groupOrderId)!
+      const user = this.users.users.find((u) => u.id === item.userId)!
+      records.push({
+        orderItemId: item.id,
+        paymentId: payment.id,
+        groupOrderId: order.id,
+        restaurantName: this.groups.partners.find((p) => p.id === order.partnerId)!.name,
+        amount: payment.amount,
+        currency: 'GNF',
+        paidAt: payment.paidAt,
+        providerTransactionId: payment.providerTransactionId,
+        participant: { name: item.participantName, phone: user.phone },
+      })
+    }
+    return records
+  }
+
+  async markRefunded(input: {
+    orderItemId: string
+    actorId: string
+    reference: string
+  }): Promise<RefundMarkResult> {
+    const item = this.groups.orderItems.find((i) => i.id === input.orderItemId)
+    if (!item) return { status: 'not_found' }
+    if (this.isRefunded(item.id)) return { status: 'already_refunded' }
+
+    const payment = this.payments.payments.find((p) => p.orderItemId === item.id)
+    if (!payment || payment.status !== 'CONFIRMED' || item.status !== 'CANCELLED') {
+      return { status: 'not_refundable' }
+    }
+
+    this.auditLogs.push({
+      actorId: input.actorId,
+      action: 'order_item.refunded',
+      targetType: 'OrderItem',
+      targetId: item.id,
+      metadata: { paymentId: payment.id, amount: payment.amount, reference: input.reference },
+    })
+    return { status: 'recorded' }
   }
 }
 
@@ -931,6 +1081,19 @@ export function createTestDeps() {
   const paymentStore = new InMemoryPaymentStore(groupOrderStore)
   const partnerStore = new InMemoryPartnerStore()
   const deliveryStore = new InMemoryDeliveryStore(groupOrderStore, userStore)
+  const ratingStore = new InMemoryRatingStore(groupOrderStore, userStore)
+  groupOrderStore.ratingOf = (groupOrderId) => {
+    const scores = ratingStore.ratings
+      .filter(
+        (r) =>
+          groupOrderStore.orderItems.find((i) => i.id === r.orderItemId)?.groupOrderId ===
+          groupOrderId,
+      )
+      .map((r) => r.score)
+    return scores.length > 0
+      ? { average: scores.reduce((a, b) => a + b, 0) / scores.length, count: scores.length }
+      : null
+  }
   groupOrderStore.deliveryOf = (groupOrderId) => {
     const delivery = deliveryStore.deliveries.find((d) => d.groupOrderId === groupOrderId)
     return delivery
@@ -947,7 +1110,9 @@ export function createTestDeps() {
     closingStore: new InMemoryClosingStore(groupOrderStore),
     partnerNotifier: new RecordingPartnerNotifier(),
     partnerStore,
-    restaurantStore: new InMemoryRestaurantStore(partnerStore),
+    restaurantStore: new InMemoryRestaurantStore(partnerStore, ratingStore),
+    ratingStore,
+    refundStore: new InMemoryRefundStore(groupOrderStore, userStore, paymentStore),
     deliveryStore,
     driverStore: deliveryStore,
     rateLimiter: new InMemoryRateLimiter(),
