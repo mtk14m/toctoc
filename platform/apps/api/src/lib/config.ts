@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { ScheduleRules } from '../services/schedule.js'
 
 // Secrets utilisables uniquement hors production : en production, ils sont obligatoires.
 const DEV_JWT_SECRET = 'dev-only-jwt-secret-do-not-use-in-production'
@@ -39,8 +40,26 @@ const envSchema = z
     // Canal d'envoi du récap au partenaire. Seul 'console' existe pour l'instant (le récap est écrit
     // dans les logs, l'équipe le transmet à la main) ; 'whatsapp' et 'sms' viendront avec leur fournisseur.
     PARTNER_NOTIFICATION: z.enum(['console']).default('console'),
+    // Règles de temps d'une commande (voir services/schedule.ts). Les heures se donnent en heures
+    // entières, en heure de Conakry (UTC) ; 24 = minuit.
+    SERVICE_START_HOUR: z.coerce.number().int().min(0).max(23).default(9),
+    SERVICE_END_HOUR: z.coerce.number().int().min(1).max(24).default(24),
+    // Combien de temps un lien accepte des commandes après son lancement.
+    ORDER_WINDOW_MINUTES: z.coerce.number().int().min(1).max(240).default(20),
+    // De la fermeture de la commande à la livraison estimée : préparation et trajet.
+    DELIVERY_LEAD_MINUTES: z.coerce.number().int().min(0).max(600).default(45),
+    // Le règlement « j'invite tout le monde » (HOST_PAYS) reste refusé tant que la charge unique du
+    // créateur n'est pas construite : sans elle, ces commandes ne se fermeraient jamais.
+    ENABLE_HOST_PAYS: z.stringbool().default(false),
   })
   .superRefine((env, ctx) => {
+    if (env.SERVICE_START_HOUR >= env.SERVICE_END_HOUR) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SERVICE_END_HOUR'],
+        message: 'doit être après SERVICE_START_HOUR',
+      })
+    }
     if (env.NODE_ENV !== 'production') return
     for (const name of ['JWT_SECRET', 'PAYMENT_WEBHOOK_SECRET'] as const) {
       if (!env[name]) {
@@ -62,6 +81,8 @@ export interface Config {
   paymentProvider: 'fake'
   paymentWebhookSecret: string
   partnerNotification: 'console'
+  schedule: ScheduleRules
+  hostPaysEnabled: boolean
 }
 
 /**
@@ -93,5 +114,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     paymentProvider: parsed.data.PAYMENT_PROVIDER,
     paymentWebhookSecret: parsed.data.PAYMENT_WEBHOOK_SECRET ?? DEV_PAYMENT_WEBHOOK_SECRET,
     partnerNotification: parsed.data.PARTNER_NOTIFICATION,
+    schedule: {
+      serviceStartMinute: parsed.data.SERVICE_START_HOUR * 60,
+      serviceEndMinute: parsed.data.SERVICE_END_HOUR * 60,
+      orderWindowMinutes: parsed.data.ORDER_WINDOW_MINUTES,
+      deliveryLeadMinutes: parsed.data.DELIVERY_LEAD_MINUTES,
+    },
+    hostPaysEnabled: parsed.data.ENABLE_HOST_PAYS,
   }
 }

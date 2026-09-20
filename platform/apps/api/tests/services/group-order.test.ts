@@ -1,18 +1,25 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   MAX_GROUP_ORDER_CREATIONS,
+  MAX_GROUP_ORDER_CREATIONS_PER_IP,
   createGroupOrderService,
   generateShareToken,
 } from '../../src/services/group-order.js'
+import { DEFAULT_SCHEDULE_RULES } from '../../src/services/schedule.js'
 import {
   InMemoryGroupOrderStore,
   InMemoryRateLimiter,
   InMemoryUserStore,
 } from '../helpers/fakes.js'
 
-const NOW = new Date('2026-09-21T08:00:00.000Z')
-const CUTOFF = new Date('2026-09-21T10:30:00.000Z')
-const DELIVERY = new Date('2026-09-21T12:00:00.000Z')
+// Lundi 21 septembre 2026, 10h00 à Conakry (UTC). La commande reste ouverte 20 minutes ; la
+// livraison est estimée 45 minutes après la fermeture (préparation et trajet).
+const NOW = new Date('2026-09-21T10:00:00.000Z')
+const CUTOFF = new Date('2026-09-21T10:20:00.000Z')
+const DELIVERY = new Date('2026-09-21T11:05:00.000Z')
+
+/** Numéros guinéens valides et distincts : 622 + 6 chiffres. */
+const phone = (n: number) => `622${String(n).padStart(6, '0')}`
 
 describe('GroupOrderService', () => {
   let users: InMemoryUserStore
@@ -20,23 +27,37 @@ describe('GroupOrderService', () => {
   let service: ReturnType<typeof createGroupOrderService>
   let relaisId: string
 
+  const serviceAt = (
+    now: Date,
+    extra: Partial<Parameters<typeof createGroupOrderService>[0]> = {},
+  ) =>
+    createGroupOrderService({
+      store,
+      users,
+      rateLimiter: new InMemoryRateLimiter(),
+      defaultCountryCode: '224',
+      rules: DEFAULT_SCHEDULE_RULES,
+      now: () => now,
+      generateShareToken: () => 'token-fixe',
+      ...extra,
+    })
+
+  const byRelais = () => ({ userId: relaisId })
+  const withoutAccount = (n = 1, name = 'Aïcha', clientIp = '203.0.113.7') => ({
+    phone: phone(n),
+    name,
+    clientIp,
+  })
+
   const validInput = () => ({
     partnerId: 'partner_1',
     deliveryAddress: 'Immeuble Kaloum Center, 3e étage',
-    orderCutoffTime: CUTOFF,
-    deliveryTime: DELIVERY,
   })
 
   beforeEach(async () => {
     users = new InMemoryUserStore()
     store = new InMemoryGroupOrderStore(users)
-    service = createGroupOrderService({
-      store,
-      users,
-      rateLimiter: new InMemoryRateLimiter(),
-      now: () => NOW,
-      generateShareToken: () => 'token-fixe',
-    })
+    service = serviceAt(NOW)
     relaisId = (await users.create({ phone: '+224621000000', name: 'Mamadou' })).id
     store.partners.push({
       id: 'partner_1',
@@ -44,11 +65,22 @@ describe('GroupOrderService', () => {
       type: 'CUISINE_MAISON',
       active: true,
     })
+    // Sans plat au menu ce jour-là, pas de commande possible : un plat suffit pour ces tests.
+    store.menuItems.push({
+      id: 'menu_riz',
+      partnerId: 'partner_1',
+      name: 'Riz gras',
+      description: null,
+      price: 25000,
+      photoUrl: null,
+      availableDate: new Date('2026-09-21'),
+      active: true,
+    })
   })
 
-  describe('create', () => {
-    it('crée un lien ouvert, en mode SPLIT par défaut, avec le token généré', async () => {
-      const created = await service.create(relaisId, validInput())
+  describe('create — commencer une commande', () => {
+    it('crée une commande ouverte 20 minutes, en mode SPLIT, avec le jeton du lien à partager', async () => {
+      const created = await service.create(byRelais(), validInput())
 
       expect(created).toEqual({
         id: expect.any(String),
@@ -61,8 +93,8 @@ describe('GroupOrderService', () => {
       })
     })
 
-    it('enregistre le créateur, le partenaire et les horaires', async () => {
-      await service.create(relaisId, validInput())
+    it('enregistre le créateur, le restaurant et les heures calculées', async () => {
+      await service.create(byRelais(), validInput())
 
       expect(store.groupOrders).toHaveLength(1)
       expect(store.groupOrders[0]).toMatchObject({
@@ -74,75 +106,176 @@ describe('GroupOrderService', () => {
       })
     })
 
-    it('accepte le mode HOST_PAYS (« j’invite tout le monde »)', async () => {
-      const created = await service.create(relaisId, { ...validInput(), paymentMode: 'HOST_PAYS' })
-
-      expect(created.paymentMode).toBe('HOST_PAYS')
-    })
-
-    it('refuse un partenaire inconnu (404 PARTNER_NOT_FOUND)', async () => {
+    it('refuse un restaurant inconnu ou désactivé (404 PARTNER_NOT_FOUND)', async () => {
       await expect(
-        service.create(relaisId, { ...validInput(), partnerId: 'inconnu' }),
+        service.create(byRelais(), { ...validInput(), partnerId: 'inconnu' }),
       ).rejects.toMatchObject({ statusCode: 404, code: 'PARTNER_NOT_FOUND' })
-    })
 
-    it('refuse un partenaire désactivé (404 PARTNER_NOT_FOUND)', async () => {
       store.partners[0]!.active = false
-
-      await expect(service.create(relaisId, validInput())).rejects.toMatchObject({
+      await expect(service.create(byRelais(), validInput())).rejects.toMatchObject({
         statusCode: 404,
         code: 'PARTNER_NOT_FOUND',
       })
     })
 
-    it('refuse une heure limite déjà passée (422 CUTOFF_IN_PAST)', async () => {
-      const past = new Date(NOW.getTime() - 60_000)
+    describe('règles d’horaires', () => {
+      it('n’ouvre pas avant 9h (422 SERVICE_NOT_OPEN)', async () => {
+        const early = serviceAt(new Date('2026-09-21T08:30:00.000Z'))
 
-      await expect(
-        service.create(relaisId, { ...validInput(), orderCutoffTime: past }),
-      ).rejects.toMatchObject({ statusCode: 422, code: 'CUTOFF_IN_PAST' })
-    })
-
-    it('refuse une heure limite égale à maintenant', async () => {
-      await expect(
-        service.create(relaisId, { ...validInput(), orderCutoffTime: NOW }),
-      ).rejects.toMatchObject({ code: 'CUTOFF_IN_PAST' })
-    })
-
-    it('refuse une livraison qui n’est pas après l’heure limite (422 DELIVERY_BEFORE_CUTOFF)', async () => {
-      await expect(
-        service.create(relaisId, { ...validInput(), deliveryTime: CUTOFF }),
-      ).rejects.toMatchObject({ statusCode: 422, code: 'DELIVERY_BEFORE_CUTOFF' })
-    })
-
-    it('refuse un créateur dont le compte est désactivé (401)', async () => {
-      users.users[0]!.isActive = false
-
-      await expect(service.create(relaisId, validInput())).rejects.toMatchObject({
-        statusCode: 401,
-        code: 'UNAUTHORIZED',
+        await expect(early.create(byRelais(), validInput())).rejects.toMatchObject({
+          statusCode: 422,
+          code: 'SERVICE_NOT_OPEN',
+        })
+        expect(store.groupOrders).toHaveLength(0)
       })
-      expect(store.groupOrders).toHaveLength(0)
-    })
 
-    it('limite le nombre de liens créés par utilisateur (429 RATE_LIMIT_EXCEEDED)', async () => {
-      for (let i = 0; i < MAX_GROUP_ORDER_CREATIONS; i++) {
-        await service.create(relaisId, validInput())
-      }
+      it('refuse une commande qui ne serait pas livrée avant minuit (422 TOO_LATE_TO_DELIVER)', async () => {
+        const late = serviceAt(new Date('2026-09-21T23:00:00.000Z'))
 
-      await expect(service.create(relaisId, validInput())).rejects.toMatchObject({
-        statusCode: 429,
-        code: 'RATE_LIMIT_EXCEEDED',
+        await expect(late.create(byRelais(), validInput())).rejects.toMatchObject({
+          statusCode: 422,
+          code: 'TOO_LATE_TO_DELIVER',
+        })
+      })
+
+      it('refuse un restaurant fermé quand il recevrait la commande (422 PARTNER_CLOSED_AT_THAT_TIME)', async () => {
+        // ne sert que de 11h à 15h : la commande de 10h00 se ferme à 10h20, il n'a pas ouvert
+        Object.assign(store.partners[0]!, { serviceStartMinute: 660, serviceEndMinute: 900 })
+
+        await expect(service.create(byRelais(), validInput())).rejects.toMatchObject({
+          statusCode: 422,
+          code: 'PARTNER_CLOSED_AT_THAT_TIME',
+        })
+      })
+
+      it('refuse un restaurant sans plat au menu ce jour-là (422 NO_MENU_FOR_DATE)', async () => {
+        store.menuItems.length = 0
+
+        await expect(service.create(byRelais(), validInput())).rejects.toMatchObject({
+          statusCode: 422,
+          code: 'NO_MENU_FOR_DATE',
+        })
+      })
+
+      it('ne compte pas un plat retiré du menu', async () => {
+        store.menuItems[0]!.active = false
+
+        await expect(service.create(byRelais(), validInput())).rejects.toMatchObject({
+          code: 'NO_MENU_FOR_DATE',
+        })
       })
     })
 
-    it('ne compte pas les créations des autres utilisateurs dans la limite', async () => {
-      const other = await users.create({ phone: '+224622000000', name: 'Aïcha' })
-      for (let i = 0; i < MAX_GROUP_ORDER_CREATIONS; i++) {
-        await service.create(relaisId, validInput())
-      }
+    describe('mode de paiement', () => {
+      it('refuse HOST_PAYS tant que la charge unique du créateur n’existe pas (422 PAYMENT_MODE_UNAVAILABLE)', async () => {
+        await expect(
+          service.create(byRelais(), { ...validInput(), paymentMode: 'HOST_PAYS' }),
+        ).rejects.toMatchObject({ statusCode: 422, code: 'PAYMENT_MODE_UNAVAILABLE' })
+        expect(store.groupOrders).toHaveLength(0)
+      })
 
-      await expect(service.create(other.id, validInput())).resolves.toBeDefined()
+      it('accepte HOST_PAYS quand il est activé', async () => {
+        const enabled = serviceAt(NOW, { hostPaysEnabled: true })
+
+        const created = await enabled.create(byRelais(), {
+          ...validInput(),
+          paymentMode: 'HOST_PAYS',
+        })
+
+        expect(created.paymentMode).toBe('HOST_PAYS')
+      })
+    })
+
+    describe('avec un compte (jeton)', () => {
+      it('refuse un créateur dont le compte est désactivé (401)', async () => {
+        users.users[0]!.isActive = false
+
+        await expect(service.create(byRelais(), validInput())).rejects.toMatchObject({
+          statusCode: 401,
+          code: 'UNAUTHORIZED',
+        })
+        expect(store.groupOrders).toHaveLength(0)
+      })
+
+      it('limite le nombre de commandes lancées par utilisateur (429 RATE_LIMIT_EXCEEDED)', async () => {
+        for (let i = 0; i < MAX_GROUP_ORDER_CREATIONS; i++) {
+          await service.create(byRelais(), validInput())
+        }
+
+        await expect(service.create(byRelais(), validInput())).rejects.toMatchObject({
+          statusCode: 429,
+          code: 'RATE_LIMIT_EXCEEDED',
+        })
+      })
+
+      it('ne compte pas les commandes des autres utilisateurs dans la limite', async () => {
+        const other = await users.create({ phone: '+224622000000', name: 'Aïcha' })
+        for (let i = 0; i < MAX_GROUP_ORDER_CREATIONS; i++) {
+          await service.create(byRelais(), validInput())
+        }
+
+        await expect(service.create({ userId: other.id }, validInput())).resolves.toBeDefined()
+      })
+    })
+
+    describe('sans compte : téléphone et nom, comme pour rejoindre', () => {
+      it('crée le compte discrètement, numéro normalisé, sans OTP', async () => {
+        const created = await service.create(withoutAccount(1, 'Aïcha Diallo'), validInput())
+
+        expect(created.shareToken).toBe('token-fixe')
+        const account = users.users.find((u) => u.phone === '+224622000001')
+        expect(account).toMatchObject({ name: 'Aïcha Diallo', role: 'CLIENT', isActive: true })
+        expect(store.groupOrders[0]!.creatorId).toBe(account!.id)
+      })
+
+      it('retrouve un compte existant sans changer son nom (pas d’usurpation par saisie)', async () => {
+        await users.create({ phone: '+224622000001', name: 'Aïcha Diallo' })
+
+        await service.create(withoutAccount(1, 'Quelqu’un d’autre'), validInput())
+
+        expect(users.users.filter((u) => u.phone === '+224622000001')).toHaveLength(1)
+        expect(users.users.find((u) => u.phone === '+224622000001')!.name).toBe('Aïcha Diallo')
+      })
+
+      it('refuse un numéro invalide (400 INVALID_PHONE)', async () => {
+        await expect(
+          service.create({ ...withoutAccount(), phone: '12' }, validInput()),
+        ).rejects.toMatchObject({ statusCode: 400, code: 'INVALID_PHONE' })
+        expect(users.users).toHaveLength(1) // seulement le relais du test
+      })
+
+      it('refuse un compte désactivé (403 ACCOUNT_DISABLED)', async () => {
+        const banned = await users.create({ phone: '+224622000001', name: 'Banni' })
+        banned.isActive = false
+
+        await expect(service.create(withoutAccount(1), validInput())).rejects.toMatchObject({
+          statusCode: 403,
+          code: 'ACCOUNT_DISABLED',
+        })
+        expect(store.groupOrders).toHaveLength(0)
+      })
+
+      it('limite par IP, avant de créer le moindre compte (429 RATE_LIMIT_EXCEEDED)', async () => {
+        for (let n = 1; n <= MAX_GROUP_ORDER_CREATIONS_PER_IP; n++) {
+          await service.create(withoutAccount(n), validInput())
+        }
+        const accountsBefore = users.users.length
+
+        await expect(
+          service.create(withoutAccount(MAX_GROUP_ORDER_CREATIONS_PER_IP + 1), validInput()),
+        ).rejects.toMatchObject({ statusCode: 429, code: 'RATE_LIMIT_EXCEEDED' })
+        expect(users.users).toHaveLength(accountsBefore)
+      })
+
+      it('ne mélange pas les IP', async () => {
+        for (let n = 1; n <= MAX_GROUP_ORDER_CREATIONS_PER_IP; n++) {
+          await service.create(withoutAccount(n), validInput())
+        }
+
+        await expect(
+          service.create(withoutAccount(900, 'Autre', '198.51.100.9'), validInput()),
+        ).resolves.toBeDefined()
+      })
     })
   })
 
@@ -159,20 +292,12 @@ describe('GroupOrderService', () => {
     let shareToken: string
 
     beforeEach(async () => {
-      shareToken = (await service.create(relaisId, validInput())).shareToken
+      shareToken = (await service.create(byRelais(), validInput())).shareToken
     })
 
     const seedMenu = () => {
       const base = { description: null, photoUrl: null, active: true }
       store.menuItems.push(
-        {
-          ...base,
-          id: 'menu_riz',
-          partnerId: 'partner_1',
-          name: 'Riz gras',
-          price: 25000,
-          availableDate: new Date('2026-09-21'),
-        },
         {
           ...base,
           id: 'menu_attieke',
@@ -261,10 +386,9 @@ describe('GroupOrderService', () => {
 
     it('lit le jour de la livraison en UTC (la Guinée est en UTC, sans heure d’été)', async () => {
       seedMenu()
-      const late = { ...validInput(), deliveryTime: new Date('2026-09-21T23:30:00.000Z') }
-      const { shareToken: lateToken } = await service.create(relaisId, { ...late })
+      store.groupOrders[0]!.deliveryTime = new Date('2026-09-21T23:30:00.000Z')
 
-      const { menu } = await service.getByShareToken(lateToken)
+      const { menu } = await service.getByShareToken(shareToken)
 
       expect(menu.map((m) => m.id)).toContain('menu_riz')
       expect(menu.map((m) => m.id)).not.toContain('menu_demain')

@@ -70,6 +70,10 @@ export async function buildApp(config: Config, deps: AppDeps) {
     store: deps.groupOrderStore,
     users: deps.userStore,
     rateLimiter: deps.rateLimiter,
+    defaultCountryCode: config.defaultCountryCode,
+    rules: config.schedule,
+    hostPaysEnabled: config.hostPaysEnabled,
+    ...(deps.now && { now: deps.now }),
   })
   // Le temps réel s'attache au serveur HTTP de l'application : les tests `inject()` n'écoutent sur
   // aucun port, et un test qui veut de vrais sockets appelle `app.listen({ port: 0 })`.

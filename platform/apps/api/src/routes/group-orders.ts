@@ -1,18 +1,20 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
+import { AppError } from '../lib/errors.js'
 import { ok } from '../lib/response.js'
-import type { GroupOrderService } from '../services/group-order.js'
+import type { GroupOrderService, OrderCreator } from '../services/group-order.js'
 
-const isoDateTime = z.iso.datetime({ offset: true }).transform((value) => new Date(value))
-
+// Les heures ne se choisissent pas : la commande reste ouverte 20 minutes, puis la livraison
+// suit (voir services/schedule.ts). Une heure envoyée par le client serait ignorée.
 const createGroupOrderSchema = z.object({
   partnerId: z.string().min(1).max(64),
   deliveryAddress: z.string().trim().min(1).max(200),
   deliveryLat: z.number().min(-90).max(90).optional(),
   deliveryLng: z.number().min(-180).max(180).optional(),
-  orderCutoffTime: isoDateTime,
-  deliveryTime: isoDateTime,
   paymentMode: z.enum(['SPLIT', 'HOST_PAYS']).optional(),
+  // Sans jeton : l'identité de celui qui commence la commande, comme pour rejoindre.
+  phone: z.string().min(1).max(25).optional(),
+  name: z.string().trim().min(1).max(100).optional(),
 })
 
 const shareTokenParams = z.object({ shareToken: z.string().min(1).max(64) })
@@ -25,9 +27,24 @@ export const groupOrderRoutes: FastifyPluginAsync<GroupOrderRoutesOptions> = asy
   app,
   { groupOrders },
 ) => {
-  app.post('/', { onRequest: [app.authenticate] }, async (req, reply) => {
-    const body = createGroupOrderSchema.parse(req.body)
-    const groupOrder = await groupOrders.create(req.user.sub, body)
+  // Ouvert à tout le monde : commencer une commande, seul ou pour la partager, ne demande ni compte
+  // ni OTP (docs/06). Un jeton, s'il est envoyé, doit être valide : on ne l'ignore pas en silence.
+  app.post('/', async (req, reply) => {
+    const { phone, name, ...input } = createGroupOrderSchema.parse(req.body)
+
+    let creator: OrderCreator
+    if (req.headers.authorization) {
+      await app.authenticate(req)
+      creator = { userId: req.user.sub }
+    } else if (phone && name) {
+      creator = { phone, name, clientIp: req.ip }
+    } else {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Données invalides', [
+        { path: ['phone', 'name'], message: 'requis sans connexion' },
+      ])
+    }
+
+    const groupOrder = await groupOrders.create(creator, input)
     return reply.code(201).send(ok({ groupOrder }))
   })
 

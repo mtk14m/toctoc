@@ -6,14 +6,19 @@ import type {
   PaymentMode,
 } from '../generated/prisma/enums.js'
 import { AppError } from '../lib/errors.js'
+import { isValidPhone, normalizePhone } from '../lib/phone.js'
 import type { RateLimiter } from '../lib/rate-limiter.js'
 import { redisKeys } from '../lib/redis-keys.js'
 import { utcDay } from '../lib/utc-day.js'
 import type { Participant } from '../realtime/events.js'
 import type { UserStore } from './auth.js'
 import { deliveryFeeForRank } from './pricing.js'
+import { planOrder, type ScheduleRules } from './schedule.js'
 
 export const MAX_GROUP_ORDER_CREATIONS = 10
+// Par IP, large exprès : un bureau entier derrière la même box lance ses commandes, souvent à la
+// même heure. Sert surtout à empêcher la création de comptes en masse sans compte ni OTP.
+export const MAX_GROUP_ORDER_CREATIONS_PER_IP = 60
 export const GROUP_ORDER_CREATION_WINDOW_SECONDS = 60 * 60
 
 export interface PartnerSummary {
@@ -21,6 +26,9 @@ export interface PartnerSummary {
   name: string
   type: PartnerType
   active: boolean
+  /** Heures de service, en minutes depuis minuit (voir `Partner` dans le schéma). */
+  serviceStartMinute: number
+  serviceEndMinute: number
 }
 
 export interface NewGroupOrder {
@@ -72,15 +80,20 @@ export interface GroupOrderStore {
   listOrderItems(groupOrderId: string): Promise<OrderItemEntry[]>
 }
 
+/** Ce que la personne choisit : le restaurant et l'adresse. Les heures sont calculées (voir schedule.ts). */
 export interface CreateGroupOrderInput {
   partnerId: string
   deliveryAddress: string
   deliveryLat?: number | undefined
   deliveryLng?: number | undefined
-  orderCutoffTime: Date
-  deliveryTime: Date
   paymentMode?: PaymentMode | undefined
 }
+
+/**
+ * Qui commence la commande : quelqu'un de connecté (jeton), ou n'importe qui avec son téléphone et
+ * son nom, comme pour rejoindre — le compte est alors créé discrètement, sans OTP (docs/06).
+ */
+export type OrderCreator = { userId: string } | { phone: string; name: string; clientIp: string }
 
 /** 12 octets aléatoires → 16 caractères sûrs dans une URL. Le lien ne révèle aucun id interne. */
 export function generateShareToken(): string {
@@ -91,59 +104,103 @@ export interface GroupOrderServiceDeps {
   store: GroupOrderStore
   users: UserStore
   rateLimiter: RateLimiter
+  defaultCountryCode: string
+  rules: ScheduleRules
+  /** Le mode « j'invite tout le monde » reste refusé tant que la charge unique du créateur n'existe pas. */
+  hostPaysEnabled?: boolean
   now?: () => Date
   generateShareToken?: () => string
 }
 
 export function createGroupOrderService(deps: GroupOrderServiceDeps) {
-  const { store, users, rateLimiter } = deps
+  const { store, users, rateLimiter, defaultCountryCode, rules } = deps
   const now = deps.now ?? (() => new Date())
   const newShareToken = deps.generateShareToken ?? generateShareToken
+  const hostPaysEnabled = deps.hostPaysEnabled ?? false
 
-  return {
-    /** Crée un lien ouvert. Le partage (`toctoc.app/g/{shareToken}`) est l'affaire du frontend. */
-    async create(creatorId: string, input: CreateGroupOrderInput) {
+  const tooManyOrders = () =>
+    new AppError(429, 'RATE_LIMIT_EXCEEDED', 'Trop de commandes lancées. Réessayez plus tard.')
+
+  /** Retrouve, ou crée, le compte de celui qui commence la commande. */
+  async function resolveCreator(creator: OrderCreator): Promise<{ id: string }> {
+    if ('userId' in creator) {
       // Un jeton reste valide jusqu'à son expiration : on revérifie que le compte est toujours actif.
-      const creator = await users.findById(creatorId)
-      if (!creator || !creator.isActive) {
+      const user = await users.findById(creator.userId)
+      if (!user || !user.isActive) {
         throw new AppError(401, 'UNAUTHORIZED', 'Authentification requise')
       }
+      return user
+    }
 
-      const creations = await rateLimiter.hit(
-        redisKeys.groupOrderCreations(creatorId),
-        GROUP_ORDER_CREATION_WINDOW_SECONDS,
-      )
-      if (creations > MAX_GROUP_ORDER_CREATIONS) {
-        throw new AppError(429, 'RATE_LIMIT_EXCEEDED', 'Trop de liens créés. Réessayez plus tard.')
-      }
+    const phone = normalizePhone(creator.phone, defaultCountryCode)
+    if (!isValidPhone(phone)) {
+      throw new AppError(400, 'INVALID_PHONE', 'Numéro de téléphone invalide')
+    }
+    // Avant de créer le moindre compte : sans compte ni OTP, c'est la seule barrière contre le spam.
+    const fromThisIp = await rateLimiter.hit(
+      redisKeys.groupOrderCreationsByIp(creator.clientIp),
+      GROUP_ORDER_CREATION_WINDOW_SECONDS,
+    )
+    if (fromThisIp > MAX_GROUP_ORDER_CREATIONS_PER_IP) throw tooManyOrders()
 
-      if (input.orderCutoffTime <= now()) {
-        throw new AppError(422, 'CUTOFF_IN_PAST', 'L’heure limite de commande est déjà passée')
-      }
-      if (input.deliveryTime <= input.orderCutoffTime) {
+    const user = await users.findOrCreateByPhone({ phone, name: creator.name })
+    if (!user.isActive) throw new AppError(403, 'ACCOUNT_DISABLED', 'Compte désactivé')
+    return user
+  }
+
+  return {
+    /**
+     * Commence une commande chez un restaurant. Elle reste ouverte 20 minutes, puis elle est
+     * préparée et livrée : la personne ne choisit aucune heure. Le partage (`toctoc.app/g/{jeton}`)
+     * est l'affaire du frontend ; commander seul, c'est ne pas le partager.
+     */
+    async create(creator: OrderCreator, input: CreateGroupOrderInput) {
+      const paymentMode = input.paymentMode ?? 'SPLIT'
+      if (paymentMode === 'HOST_PAYS' && !hostPaysEnabled) {
         throw new AppError(
           422,
-          'DELIVERY_BEFORE_CUTOFF',
-          'La livraison doit avoir lieu après l’heure limite de commande',
+          'PAYMENT_MODE_UNAVAILABLE',
+          'Le règlement pour tout le groupe n’est pas encore disponible',
         )
       }
 
+      const creatorUser = await resolveCreator(creator)
+
+      const creations = await rateLimiter.hit(
+        redisKeys.groupOrderCreations(creatorUser.id),
+        GROUP_ORDER_CREATION_WINDOW_SECONDS,
+      )
+      if (creations > MAX_GROUP_ORDER_CREATIONS) throw tooManyOrders()
+
       const partner = await store.findPartner(input.partnerId)
       if (!partner || !partner.active) {
-        throw new AppError(404, 'PARTNER_NOT_FOUND', 'Partenaire introuvable')
+        throw new AppError(404, 'PARTNER_NOT_FOUND', 'Restaurant introuvable')
       }
 
-      const paymentMode = input.paymentMode ?? 'SPLIT'
+      const { orderCutoffTime, deliveryTime } = planOrder({
+        now: now(),
+        partnerHours: {
+          startMinute: partner.serviceStartMinute,
+          endMinute: partner.serviceEndMinute,
+        },
+        rules,
+      })
+
+      // Sans plat au menu ce jour-là, il n'y a rien à commander : on ne fait pas ouvrir une commande vide.
+      if ((await store.listMenu(partner.id, utcDay(deliveryTime))).length === 0) {
+        throw new AppError(422, 'NO_MENU_FOR_DATE', 'Ce restaurant n’a pas de menu aujourd’hui')
+      }
+
       const shareToken = newShareToken()
       const { id, status } = await store.create({
-        creatorId,
+        creatorId: creatorUser.id,
         partnerId: partner.id,
         shareToken,
         deliveryAddress: input.deliveryAddress,
         deliveryLat: input.deliveryLat,
         deliveryLng: input.deliveryLng,
-        orderCutoffTime: input.orderCutoffTime,
-        deliveryTime: input.deliveryTime,
+        orderCutoffTime,
+        deliveryTime,
         paymentMode,
       })
 
@@ -152,8 +209,8 @@ export function createGroupOrderService(deps: GroupOrderServiceDeps) {
         shareToken,
         status,
         deliveryAddress: input.deliveryAddress,
-        orderCutoffTime: input.orderCutoffTime,
-        deliveryTime: input.deliveryTime,
+        orderCutoffTime,
+        deliveryTime,
         paymentMode,
       }
     },

@@ -50,13 +50,41 @@ Le jeton reste valable, le rôle est relu en base à chaque appel `/admin/*`. En
 (`Authorization: Bearer …`) :
 
 ```bash
-# un partenaire (commissionRate optionnel, 15 % par défaut)
+# un partenaire (commissionRate optionnel, 15 % par défaut ; serviceStart / serviceEnd optionnels,
+# 09:00 - 24:00 par défaut : une cuisinière qui ne fait que le déjeuner met "11:00" et "15:00")
 curl -X POST localhost:3000/admin/partners -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"name":"Chez Aïssatou","type":"CUISINE_MAISON","phone":"622 00 00 00","address":"Almamya","city":"Conakry"}'
-# son plat du jour (prix en GNF entiers, date AAAA-MM-JJ)
+# son plat du jour (prix en GNF entiers, date AAAA-MM-JJ : sans plat ce jour-là, pas de commande possible)
 curl -X POST localhost:3000/admin/partners/$PARTNER_ID/menu-items -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"name":"Riz gras","price":25000,"availableDate":"2026-09-22"}'
 ```
+
+## Commencer une commande
+
+Tout le monde peut commencer une commande, seul ou pour la partager : **téléphone et nom suffisent**, le compte
+est créé discrètement (pas d'OTP), comme pour rejoindre. Avec un jeton (`Authorization: Bearer …`), le téléphone
+et le nom ne sont pas nécessaires ; un jeton invalide est refusé, pas ignoré.
+
+```bash
+curl -X POST localhost:3000/group-orders -H 'content-type: application/json' \
+  -d '{"partnerId":"'$PARTNER_ID'","deliveryAddress":"Kaloum Center, 3e étage","phone":"622 00 00 01","name":"Aïcha"}'
+# → { orderCutoffTime, deliveryTime, shareToken, ... } ; le lien à partager est toctoc.app/g/{shareToken}
+```
+
+**On ne choisit aucune heure.** La commande reste ouverte **20 minutes** (`orderCutoffTime`), puis la livraison
+est estimée **45 minutes** plus tard (`deliveryTime` : préparation et trajet). Une heure envoyée par le client est
+ignorée. Règles refusées avec un 422 exploitable par le frontend :
+
+| Code                          | Cas                                                                                |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| `SERVICE_NOT_OPEN`            | avant 9h, ou la nuit                                                               |
+| `TOO_LATE_TO_DELIVER`         | la livraison estimée dépasserait minuit (dernière commande à 22h54)                |
+| `PARTNER_CLOSED_AT_THAT_TIME` | le restaurant est fermé quand il recevrait la commande (à la fermeture du lien)    |
+| `NO_MENU_FOR_DATE`            | aucun plat au menu ce jour-là                                                      |
+| `PAYMENT_MODE_UNAVAILABLE`    | `HOST_PAYS` (`ENABLE_HOST_PAYS=false` tant que la charge du créateur n'existe pas) |
+
+Les 20 minutes, les 45 minutes et les heures de service se règlent dans `.env` (`ORDER_WINDOW_MINUTES`,
+`DELIVERY_LEAD_MINUTES`, `SERVICE_START_HOUR`, `SERVICE_END_HOUR`).
 
 ## Simuler un paiement (avant l'opérateur mobile money)
 

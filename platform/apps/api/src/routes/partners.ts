@@ -2,6 +2,10 @@ import type { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { ok } from '../lib/response.js'
 import type { PartnerService } from '../services/partner.js'
+import { DEFAULT_SCHEDULE_RULES, formatClock, parseClock } from '../services/schedule.js'
+
+const DEFAULT_START = DEFAULT_SCHEDULE_RULES.serviceStartMinute
+const DEFAULT_END = DEFAULT_SCHEDULE_RULES.serviceEndMinute
 
 export interface PartnerRoutesOptions {
   partners: PartnerService
@@ -25,14 +29,33 @@ const commissionRate = z
   .max(1)
   .refine((rate) => Math.round(rate * 10_000) / 10_000 === rate, 'au plus 4 décimales')
 
-const createPartnerSchema = z.object({
-  name: z.string().trim().min(1).max(100),
-  type: z.enum(['RESTAURANT', 'CUISINE_MAISON']),
-  phone: z.string().min(1).max(25),
-  address: z.string().trim().min(1).max(200),
-  city: z.string().trim().min(1).max(100),
-  commissionRate: commissionRate.optional(),
-})
+// « HH:mm » (24:00 accepté pour la fin) : ce que l'équipe saisit, converti en minutes depuis minuit.
+const clock = z
+  .string()
+  .refine((value) => parseClock(value) !== null, 'format HH:mm attendu, par exemple 11:30')
+  .transform((value) => parseClock(value)!)
+
+const createPartnerSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100),
+    type: z.enum(['RESTAURANT', 'CUISINE_MAISON']),
+    phone: z.string().min(1).max(25),
+    address: z.string().trim().min(1).max(200),
+    city: z.string().trim().min(1).max(100),
+    commissionRate: commissionRate.optional(),
+    serviceStart: clock.optional(),
+    serviceEnd: clock.optional(),
+  })
+  .refine(
+    ({ serviceStart = DEFAULT_START, serviceEnd = DEFAULT_END }) => serviceStart < serviceEnd,
+    { path: ['serviceEnd'], message: 'la fin de service doit être après le début' },
+  )
+  // Les minutes vont au service ; l'API parle en « HH:mm ».
+  .transform(({ serviceStart, serviceEnd, ...rest }) => ({
+    ...rest,
+    serviceStartMinute: serviceStart,
+    serviceEndMinute: serviceEnd,
+  }))
 
 const createMenuItemSchema = z.object({
   name: z.string().trim().min(1).max(100),
@@ -56,8 +79,16 @@ export const adminPartnerRoutes: FastifyPluginAsync<PartnerRoutesOptions> = asyn
 
   app.post('/partners', async (req, reply) => {
     const body = createPartnerSchema.parse(req.body)
-    const partner = await partners.createPartner(body)
-    return reply.code(201).send(ok({ partner }))
+    const { serviceStartMinute, serviceEndMinute, ...partner } = await partners.createPartner(body)
+    return reply.code(201).send(
+      ok({
+        partner: {
+          ...partner,
+          serviceStart: formatClock(serviceStartMinute),
+          serviceEnd: formatClock(serviceEndMinute),
+        },
+      }),
+    )
   })
 
   app.post('/partners/:partnerId/menu-items', async (req, reply) => {

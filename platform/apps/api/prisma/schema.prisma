@@ -118,6 +118,11 @@ model Partner {
   businessRegistrationNumber String? // optionnel : beaucoup de cuisinières n'en ont pas
   verifiedAt                 DateTime?
   active                     Boolean      @default(true)
+  // Heures de service, en minutes depuis minuit (heure de Conakry = UTC). Une livraison n'est
+  // proposée que dans [début, fin[ : 540 = 9h00, 1440 = minuit. Une cuisinière qui ne fait que le
+  // déjeuner met par exemple 660 et 900. Un jour sans menu (MenuItem) est un jour fermé.
+  serviceStartMinute         Int          @default(540)
+  serviceEndMinute           Int          @default(1440)
   createdAt                  DateTime     @default(now())
   menuItems                  MenuItem[]
   groupOrders                GroupOrder[]

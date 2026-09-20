@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Partner" ADD COLUMN     "serviceEndMinute" INTEGER NOT NULL DEFAULT 1440,
+ADD COLUMN     "serviceStartMinute" INTEGER NOT NULL DEFAULT 540;

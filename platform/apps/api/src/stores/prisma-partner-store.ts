@@ -16,16 +16,28 @@ const partnerSelect = {
   address: true,
   city: true,
   commissionRate: true,
+  serviceStartMinute: true,
+  serviceEndMinute: true,
   active: true,
 } as const
 
 export class PrismaPartnerStore implements PartnerStore {
   constructor(private readonly db: PrismaClient) {}
 
-  create({ commissionRate, ...input }: NewPartner): Promise<PartnerRecord> {
+  create({
+    commissionRate,
+    serviceStartMinute,
+    serviceEndMinute,
+    ...input
+  }: NewPartner): Promise<PartnerRecord> {
     return this.db.partner.create({
-      // Sans taux, le défaut du schéma s'applique ; Prisma refuse un `undefined` explicite.
-      data: { ...input, ...(commissionRate !== undefined && { commissionRate }) },
+      // Sans valeur, le défaut du schéma s'applique ; Prisma refuse un `undefined` explicite.
+      data: {
+        ...input,
+        ...(commissionRate !== undefined && { commissionRate }),
+        ...(serviceStartMinute !== undefined && { serviceStartMinute }),
+        ...(serviceEndMinute !== undefined && { serviceEndMinute }),
+      },
       select: partnerSelect,
     })
   }
