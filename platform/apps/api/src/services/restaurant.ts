@@ -1,5 +1,6 @@
 import type { PartnerType } from '../generated/prisma/enums.js'
 import { AppError } from '../lib/errors.js'
+import { roundAverage } from '../lib/round-average.js'
 import { utcDay } from '../lib/utc-day.js'
 import type { MenuEntry } from './group-order.js'
 import {
@@ -75,9 +76,7 @@ export function createRestaurantService(deps: RestaurantServiceDeps) {
         end: formatClock(record.serviceEndMinute),
       },
       // Jamais « 0 sur 5 » : sans note, aucune note.
-      rating: rating
-        ? { average: Math.round(rating.average * 10) / 10, count: rating.count }
-        : null,
+      rating: rating ? { average: roundAverage(rating.average), count: rating.count } : null,
       todaysMenu: {
         count: menu.length,
         preview: menu.slice(0, PREVIEW_SIZE).map(({ name, price }) => ({ name, price })),
