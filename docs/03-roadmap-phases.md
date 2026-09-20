@@ -29,6 +29,7 @@ Chaque phase a un objectif unique, des critères de sortie mesurables, et ne s'o
 **Objectif** : remplacer la simulation manuelle de la Phase 0 par la fonctionnalité elle-même — et rien d'autre. Pas de catalogue étendu, pas de compte utilisateur complexe, pas d'app native obligatoire au départ. Le détail complet de cette fonctionnalité (parcours, moments "waouh" à préserver dans le vrai produit) est dans [06-fonctionnalite-lancement.md](06-fonctionnalite-lancement.md).
 
 **Périmètre produit minimal, strictement limité à** :
+- Choisir un restaurant, puis commander **seul ou en groupe**. Une commande porte sur un seul restaurant ; le groupage ne passe que par un lien partagé ; une commande solo est une commande de groupe d'une personne, ouverte 20 minutes puis livrée comme les autres, de 9h à minuit (voir [06-fonctionnalite-lancement.md](06-fonctionnalite-lancement.md)).
 - Créer un lien de commande groupée pour une adresse et une heure de livraison donnée.
 - Rejoindre ce lien depuis un navigateur mobile (pas de téléchargement d'app requis pour rejoindre), voir en direct qui a déjà rejoint et ce qu'il a choisi, choisir son propre plat dans un menu du jour restreint (peu de choix, décision rapide).
 - Payer sa propre part indépendamment des autres participants, en mobile money uniquement (pas de cash, voir [08-schema-donnees.md](08-schema-donnees.md)) — avec un frais de livraison dégressif selon le rang de la commande sur le lien (voir [04-modele-economique.md](04-modele-economique.md)).
