@@ -32,6 +32,14 @@ export class PrismaPaymentStore implements PaymentStore {
     }
   }
 
+  async findByOrderItemId(orderItemId: string): Promise<PaymentRecord | null> {
+    const payment = await this.db.payment.findUnique({
+      where: { orderItemId },
+      select: { id: true },
+    })
+    return payment ? this.findById(payment.id) : null
+  }
+
   countActiveOrderItems(groupOrderId: string): Promise<number> {
     return this.db.orderItem.count({
       where: { groupOrderId, status: { not: 'CANCELLED' } },

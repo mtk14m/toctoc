@@ -66,6 +66,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-local-compose-secret-do-not-use-elsewhere-32ch}
       OTP_DELIVERY: console # le code de connexion apparaît dans `pnpm stack:logs`
       PAYMENT_PROVIDER: fake # aucun opérateur réel : les paiements se simulent (voir README)
+      ENABLE_PAYMENT_SIMULATOR: 'true' # POST /dev/order-items/:id/payment paie une part (local seulement)
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-local-compose-webhook-secret-do-not-use-32}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
     depends_on:

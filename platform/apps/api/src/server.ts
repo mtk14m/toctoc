@@ -28,6 +28,12 @@ if (config.nodeEnv === 'production' && config.paymentProvider === 'fake') {
       'PAYMENT_WEBHOOK_SECRET peut « payer ». À réserver au pilote interne.',
   )
 }
+if (config.paymentSimulatorEnabled) {
+  app.log.warn(
+    'ENABLE_PAYMENT_SIMULATOR=true : POST /dev/order-items/:id/payment paie une part sans opérateur, ' +
+      'sans aucune authentification. Jamais avec de vrais clients.',
+  )
+}
 if (config.nodeEnv === 'production' && config.partnerNotification === 'console') {
   app.log.warn(
     'PARTNER_NOTIFICATION=console en production : les récaps partenaires sont écrits dans les logs, ' +
