@@ -8,6 +8,7 @@ import type { OtpSender, OtpStore } from './services/otp.js'
 import type { PartnerNotifier } from './services/partner-notifier.js'
 import type { PartnerStore } from './services/partner.js'
 import type { PaymentGateway, PaymentStore } from './services/payment.js'
+import type { RestaurantStore } from './services/restaurant.js'
 
 /**
  * Tout ce que l'application utilise pour parler au monde extérieur (base, Redis, envoi de code).
@@ -20,6 +21,7 @@ export interface AppDeps {
   groupOrderStore: GroupOrderStore
   orderItemStore: OrderItemStore
   partnerStore: PartnerStore
+  restaurantStore: RestaurantStore
   paymentStore: PaymentStore
   paymentGateway: PaymentGateway
   closingStore: ClosingStore

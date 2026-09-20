@@ -13,6 +13,11 @@ export interface NewPartner {
   /** Heures de service en minutes depuis minuit ; sans valeur, 9h - minuit (défaut du schéma). */
   serviceStartMinute?: number | undefined
   serviceEndMinute?: number | undefined
+  /** Présentation dans l'annuaire public. */
+  description?: string | undefined
+  logoUrl?: string | undefined
+  coverUrl?: string | undefined
+  tags?: string[] | undefined
 }
 
 export interface PartnerRecord {
@@ -25,15 +30,22 @@ export interface PartnerRecord {
   commissionRate: number
   serviceStartMinute: number
   serviceEndMinute: number
+  description: string | null
+  logoUrl: string | null
+  coverUrl: string | null
+  tags: string[]
   active: boolean
 }
 
-/** Ce qu'un relais voit pour choisir un partenaire : rien d'interne. */
-export interface PartnerListItem {
-  id: string
-  name: string
-  type: PartnerType
-  city: string
+/** Ce que l'équipe peut modifier. Une clé absente ne change rien ; `null` efface. */
+export interface PartnerPatch {
+  description?: string | null | undefined
+  logoUrl?: string | null | undefined
+  coverUrl?: string | null | undefined
+  tags?: string[] | undefined
+  serviceStartMinute?: number | undefined
+  serviceEndMinute?: number | undefined
+  active?: boolean | undefined
 }
 
 export interface NewMenuItem {
@@ -60,7 +72,9 @@ export interface MenuItemRecord {
 /** Persistance des partenaires et de leur menu. Prisma en production, en mémoire dans les tests. */
 export interface PartnerStore {
   create(input: NewPartner): Promise<PartnerRecord>
-  listActive(): Promise<PartnerListItem[]>
+  findById(id: string): Promise<PartnerRecord | null>
+  /** Renvoie null si le restaurant n'existe pas. */
+  update(id: string, patch: PartnerPatch): Promise<PartnerRecord | null>
   exists(id: string): Promise<boolean>
   createMenuItem(input: NewMenuItem): Promise<MenuItemRecord>
 }
@@ -82,8 +96,27 @@ export function createPartnerService(deps: PartnerServiceDeps) {
       return store.create({ ...input, phone })
     },
 
-    listActivePartners(): Promise<PartnerListItem[]> {
-      return store.listActive()
+    /**
+     * Modifie la présentation, les heures ou l'activité d'un restaurant. Les heures sont contrôlées
+     * avec celles déjà enregistrées : ne changer que le début ne doit pas le passer après la fin.
+     */
+    async updatePartner(id: string, patch: PartnerPatch): Promise<PartnerRecord> {
+      const current = await store.findById(id)
+      if (!current) throw new AppError(404, 'PARTNER_NOT_FOUND', 'Restaurant introuvable')
+
+      const start = patch.serviceStartMinute ?? current.serviceStartMinute
+      const end = patch.serviceEndMinute ?? current.serviceEndMinute
+      if (start >= end) {
+        throw new AppError(
+          422,
+          'INVALID_SERVICE_HOURS',
+          'Le début de service doit être avant la fin de service',
+        )
+      }
+
+      const updated = await store.update(id, patch)
+      if (!updated) throw new AppError(404, 'PARTNER_NOT_FOUND', 'Restaurant introuvable')
+      return updated
     },
 
     async addMenuItem(partnerId: string, input: Omit<NewMenuItem, 'partnerId'>) {

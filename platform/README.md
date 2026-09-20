@@ -51,13 +51,36 @@ Le jeton reste valable, le rôle est relu en base à chaque appel `/admin/*`. En
 
 ```bash
 # un partenaire (commissionRate optionnel, 15 % par défaut ; serviceStart / serviceEnd optionnels,
-# 09:00 - 24:00 par défaut : une cuisinière qui ne fait que le déjeuner met "11:00" et "15:00")
+# 09:00 - 24:00 par défaut : une cuisinière qui ne fait que le déjeuner met "11:00" et "15:00" ;
+# description, logoUrl, coverUrl et tags (8 au plus) alimentent l'annuaire public)
 curl -X POST localhost:3000/admin/partners -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
-  -d '{"name":"Chez Aïssatou","type":"CUISINE_MAISON","phone":"622 00 00 00","address":"Almamya","city":"Conakry"}'
+  -d '{"name":"Chez Aïssatou","type":"CUISINE_MAISON","phone":"622 00 00 00","address":"Almamya","city":"Conakry","description":"Cuisine guinéenne du quotidien","tags":["riz gras","poulet braisé"]}'
+# la modifier ensuite : une clé absente ne change rien, null efface ; "active": false la retire de l'annuaire
+curl -X PATCH localhost:3000/admin/partners/$PARTNER_ID -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"logoUrl":"https://cdn.example.com/logo.png","serviceStart":"11:00","serviceEnd":"15:00"}'
 # son plat du jour (prix en GNF entiers, date AAAA-MM-JJ : sans plat ce jour-là, pas de commande possible)
 curl -X POST localhost:3000/admin/partners/$PARTNER_ID/menu-items -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"name":"Riz gras","price":25000,"availableDate":"2026-09-22"}'
 ```
+
+## L'annuaire des restaurants (public)
+
+Le parcours commence par le choix d'un restaurant ([docs/12](../docs/12-la-commande.md)). Aucun jeton requis :
+
+```bash
+curl localhost:3000/restaurants          # tous les restaurants actifs
+curl localhost:3000/restaurants/$ID      # la fiche, avec le menu complet du jour
+```
+
+Chaque restaurant porte sa présentation (`description`, `logoUrl`, `coverUrl`, `tags`), ses heures (`hours`),
+sa note (`rating`, `null` tant qu'il n'y en a pas), un résumé du menu du jour (`todaysMenu` : le nombre de
+plats et un aperçu de trois) et surtout `availability` : `{ available: true }`, ou `available: false` avec la
+raison (`SERVICE_NOT_OPEN`, `TOO_LATE_TO_DELIVER`, `PARTNER_CLOSED_AT_THAT_TIME`, `NO_MENU_FOR_DATE`) et les heures
+utiles à afficher (« ouvre à 11:00 »). Ce sont **exactement** les règles de la création d'une commande : un
+restaurant n'est jamais annoncé disponible alors que commencer une commande serait refusé.
+
+Les disponibles passent en premier, puis les mieux notés, puis l'ordre alphabétique. Ni téléphone, ni adresse, ni
+commission. Réponse mise en cache 30 secondes (`cache-control: public, max-age=30`).
 
 ## Commencer une commande
 

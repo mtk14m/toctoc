@@ -214,28 +214,141 @@ describe('routes partenaires et menu', () => {
     })
   })
 
-  describe('GET /partners', () => {
-    it('exige un jeton (401)', async () => {
-      const res = await app.inject({ method: 'GET', url: '/partners' })
+  describe('la présentation à la création', () => {
+    it('accepte description, logo, couverture et spécialités', async () => {
+      const res = await post(
+        '/admin/partners',
+        {
+          ...validPartner(),
+          description: 'Cuisine faite maison',
+          logoUrl: 'https://cdn.example.com/logo.png',
+          coverUrl: 'https://cdn.example.com/cover.jpg',
+          tags: ['riz gras', 'poulet braisé'],
+        },
+        adminToken,
+      )
 
-      expect(res.statusCode).toBe(401)
+      expect(res.statusCode).toBe(201)
+      expect(res.json().data.partner).toMatchObject({
+        description: 'Cuisine faite maison',
+        logoUrl: 'https://cdn.example.com/logo.png',
+        tags: ['riz gras', 'poulet braisé'],
+      })
     })
 
-    it('liste les partenaires actifs pour un relais, sans données internes', async () => {
-      await post('/admin/partners', validPartner(), adminToken)
+    it.each([
+      ['un logo qui n’est pas une URL http(s)', { logoUrl: 'javascript:alert(1)' }],
+      ['une couverture qui n’est pas une URL', { coverUrl: 'pas une url' }],
+      ['plus de 8 spécialités', { tags: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'] }],
+      ['une spécialité vide', { tags: ['riz gras', '  '] }],
+      ['une description trop longue', { description: 'x'.repeat(501) }],
+    ])('refuse %s (400 VALIDATION_ERROR)', async (_label, override) => {
+      const res = await post('/admin/partners', { ...validPartner(), ...override }, adminToken)
 
-      const res = await app.inject({
-        method: 'GET',
-        url: '/partners',
-        headers: { authorization: `Bearer ${clientToken}` },
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error.code).toBe('VALIDATION_ERROR')
+    })
+
+    it('retire les doublons parmi les spécialités', async () => {
+      const res = await post(
+        '/admin/partners',
+        { ...validPartner(), tags: ['riz gras', ' riz gras ', 'poulet'] },
+        adminToken,
+      )
+
+      expect(res.json().data.partner.tags).toEqual(['riz gras', 'poulet'])
+    })
+  })
+
+  describe('PATCH /admin/partners/:partnerId', () => {
+    let partnerId: string
+
+    const patch = (payload: Record<string, unknown>, token: string | null = adminToken) =>
+      app.inject({
+        method: 'PATCH',
+        url: `/admin/partners/${partnerId}`,
+        payload,
+        ...(token && { headers: { authorization: `Bearer ${token}` } }),
+      })
+
+    beforeEach(async () => {
+      const res = await post('/admin/partners', validPartner(), adminToken)
+      partnerId = res.json().data.partner.id
+    })
+
+    it('exige un jeton (401) et le rôle ADMIN_PLATFORM (403)', async () => {
+      expect((await patch({ active: false }, null)).statusCode).toBe(401)
+      expect((await patch({ active: false }, clientToken)).statusCode).toBe(403)
+    })
+
+    it('met à jour la présentation, les heures (HH:mm) et l’activité', async () => {
+      const res = await patch({
+        description: 'Nouvelle description',
+        tags: ['attiéké'],
+        serviceStart: '11:00',
+        serviceEnd: '15:00',
+        active: false,
       })
 
       expect(res.statusCode).toBe(200)
-      expect(res.json().data.partners).toEqual([
-        { id: expect.any(String), name: 'Chez Aïssatou', type: 'CUISINE_MAISON', city: 'Conakry' },
-      ])
-      expect(res.body).not.toContain('+224621000000')
-      expect(res.body).not.toContain('commissionRate')
+      expect(res.json().data.partner).toMatchObject({
+        name: 'Chez Aïssatou',
+        description: 'Nouvelle description',
+        tags: ['attiéké'],
+        serviceStart: '11:00',
+        serviceEnd: '15:00',
+        active: false,
+      })
+    })
+
+    it('efface une description avec null', async () => {
+      await patch({ description: 'À effacer' })
+
+      const res = await patch({ description: null })
+
+      expect(res.json().data.partner.description).toBeNull()
+    })
+
+    it('refuse une modification vide (400 VALIDATION_ERROR)', async () => {
+      const res = await patch({})
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error.code).toBe('VALIDATION_ERROR')
+    })
+
+    it.each([
+      ['un format d’heure faux', { serviceStart: '9h' }],
+      [
+        'un début après la fin dans la même requête',
+        { serviceStart: '15:00', serviceEnd: '11:00' },
+      ],
+      ['un logo qui n’est pas une URL', { logoUrl: 'nope' }],
+    ])('refuse %s (400 VALIDATION_ERROR)', async (_label, body) => {
+      const res = await patch(body)
+
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error.code).toBe('VALIDATION_ERROR')
+    })
+
+    it('refuse une heure incohérente avec celle déjà enregistrée (422 INVALID_SERVICE_HOURS)', async () => {
+      await patch({ serviceStart: '11:00', serviceEnd: '15:00' })
+
+      const res = await patch({ serviceStart: '20:00' })
+
+      expect(res.statusCode).toBe(422)
+      expect(res.json().error.code).toBe('INVALID_SERVICE_HOURS')
+    })
+
+    it('répond 404 pour un restaurant inconnu', async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/admin/partners/inconnu',
+        payload: { active: false },
+        headers: { authorization: `Bearer ${adminToken}` },
+      })
+
+      expect(res.statusCode).toBe(404)
+      expect(res.json().error.code).toBe('PARTNER_NOT_FOUND')
     })
   })
 })

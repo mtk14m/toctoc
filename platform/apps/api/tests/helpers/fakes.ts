@@ -29,12 +29,13 @@ import type {
 } from '../../src/services/payment.js'
 import type { CloseResult, ClosingStore, RecapCandidate } from '../../src/services/closing.js'
 import type { PartnerNotifier } from '../../src/services/partner-notifier.js'
+import type { RestaurantRecord, RestaurantStore } from '../../src/services/restaurant.js'
 import type { RealtimePublisher, ServerToClientEvents } from '../../src/realtime/events.js'
 import type {
   MenuItemRecord,
   NewMenuItem,
   NewPartner,
-  PartnerListItem,
+  PartnerPatch,
   PartnerRecord,
   PartnerStore,
 } from '../../src/services/partner.js'
@@ -216,16 +217,28 @@ export class InMemoryPartnerStore implements PartnerStore {
       commissionRate: input.commissionRate ?? 0.15, // le défaut du schéma Prisma
       serviceStartMinute: input.serviceStartMinute ?? 540, // 9h00, défaut du schéma Prisma
       serviceEndMinute: input.serviceEndMinute ?? 1440, // minuit
+      description: input.description ?? null,
+      logoUrl: input.logoUrl ?? null,
+      coverUrl: input.coverUrl ?? null,
+      tags: input.tags ?? [],
       active: true,
     }
     this.partners.push(partner)
     return partner
   }
 
-  async listActive(): Promise<PartnerListItem[]> {
-    return this.partners
-      .filter((p) => p.active)
-      .map(({ id, name, type, city }) => ({ id, name, type, city }))
+  async findById(id: string): Promise<PartnerRecord | null> {
+    return this.partners.find((p) => p.id === id) ?? null
+  }
+
+  async update(id: string, patch: PartnerPatch): Promise<PartnerRecord | null> {
+    const partner = this.partners.find((p) => p.id === id)
+    if (!partner) return null
+    // Comme Prisma : une clé absente ne change rien, `null` efface.
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) Object.assign(partner, { [key]: value })
+    }
+    return partner
   }
 
   async exists(id: string): Promise<boolean> {
@@ -245,6 +258,57 @@ export class InMemoryPartnerStore implements PartnerStore {
     }
     this.menuItems.push(item)
     return item
+  }
+}
+
+/** Lit les partenaires et les plats du store partenaires : un restaurant créé par l'équipe apparaît dans l'annuaire. */
+export class InMemoryRestaurantStore implements RestaurantStore {
+  /** Note moyenne et nombre de notes par restaurant (le modèle Rating n'a pas encore de route). */
+  ratings = new Map<string, { average: number; count: number }>()
+
+  constructor(private readonly partners: InMemoryPartnerStore) {}
+
+  async listActive(): Promise<RestaurantRecord[]> {
+    return this.partners.partners.filter((p) => p.active).map(toRestaurantRecord)
+  }
+
+  async findActive(id: string): Promise<RestaurantRecord | null> {
+    const partner = this.partners.partners.find((p) => p.id === id && p.active)
+    return partner ? toRestaurantRecord(partner) : null
+  }
+
+  async ratingsFor(partnerIds: string[]): Promise<Map<string, { average: number; count: number }>> {
+    return new Map([...this.ratings].filter(([id]) => partnerIds.includes(id)))
+  }
+
+  async menuOn(partnerIds: string[], date: Date): Promise<Map<string, MenuEntry[]>> {
+    const byPartner = new Map<string, MenuEntry[]>()
+    for (const item of this.partners.menuItems) {
+      if (!partnerIds.includes(item.partnerId)) continue
+      if (item.availableDate.getTime() !== date.getTime()) continue
+      const { id, name, description, price, photoUrl } = item
+      byPartner.set(item.partnerId, [
+        ...(byPartner.get(item.partnerId) ?? []),
+        { id, name, description, price, photoUrl },
+      ])
+    }
+    return byPartner
+  }
+}
+
+function toRestaurantRecord(partner: PartnerRecord): RestaurantRecord {
+  const { id, name, type, city, description, logoUrl, coverUrl, tags } = partner
+  return {
+    id,
+    name,
+    type,
+    city,
+    description,
+    logoUrl,
+    coverUrl,
+    tags,
+    serviceStartMinute: partner.serviceStartMinute,
+    serviceEndMinute: partner.serviceEndMinute,
   }
 }
 
@@ -582,6 +646,7 @@ export function createTestDeps() {
   const userStore = new InMemoryUserStore()
   const groupOrderStore = new InMemoryGroupOrderStore(userStore)
   const paymentStore = new InMemoryPaymentStore(groupOrderStore)
+  const partnerStore = new InMemoryPartnerStore()
   return {
     otpStore: new InMemoryOtpStore(),
     userStore,
@@ -591,7 +656,8 @@ export function createTestDeps() {
     paymentGateway: new RecordingPaymentGateway(),
     closingStore: new InMemoryClosingStore(groupOrderStore),
     partnerNotifier: new RecordingPartnerNotifier(),
-    partnerStore: new InMemoryPartnerStore(),
+    partnerStore,
+    restaurantStore: new InMemoryRestaurantStore(partnerStore),
     rateLimiter: new InMemoryRateLimiter(),
     otpSender: new RecordingOtpSender(),
   } satisfies AppDeps

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SCHEDULE_RULES,
+  explainAvailability,
   formatClock,
   parseClock,
   planOrder,
@@ -104,6 +105,59 @@ describe('planOrder — horaires du partenaire (service réduit)', () => {
     expect(failureOf(() => plan(at('19:00'), { partnerHours: lunchOnly }))).toMatchObject({
       code: 'PARTNER_CLOSED_AT_THAT_TIME',
     })
+  })
+})
+
+describe('explainAvailability — pourquoi on peut, ou non, commander chez ce restaurant maintenant', () => {
+  const lunchOnly = { startMinute: 660, endMinute: 900 }
+  const explain = (now: Date, overrides: Partial<Parameters<typeof explainAvailability>[0]> = {}) =>
+    explainAvailability({
+      now,
+      partnerHours: ALL_DAY,
+      rules: DEFAULT_SCHEDULE_RULES,
+      menuCount: 3,
+      ...overrides,
+    })
+
+  it('est disponible quand tout est réuni', () => {
+    expect(explain(at('12:00'))).toEqual({ available: true })
+  })
+
+  it.each([
+    ['avant l’ouverture du service', at('08:30'), {}, 'SERVICE_NOT_OPEN'],
+    ['trop tard pour être livré avant minuit', at('23:00'), {}, 'TOO_LATE_TO_DELIVER'],
+    [
+      'restaurant fermé à la fermeture du lien',
+      at('19:00'),
+      { partnerHours: lunchOnly },
+      'PARTNER_CLOSED_AT_THAT_TIME',
+    ],
+    ['aucun plat au menu aujourd’hui', at('12:00'), { menuCount: 0 }, 'NO_MENU_FOR_DATE'],
+  ])('indique la raison : %s', (_label, now, overrides, reason) => {
+    expect(explain(now, overrides)).toMatchObject({ available: false, reason })
+  })
+
+  it('donne les heures utiles à l’affichage (« ouvre à 11:00 »)', () => {
+    expect(explain(at('19:00'), { partnerHours: lunchOnly })).toMatchObject({
+      details: { opensAt: '11:00', closesAt: '15:00' },
+    })
+  })
+
+  it('applique les mêmes règles que la création d’une commande : jamais « disponible » pour un refus', () => {
+    // planOrder refuse ? alors explainAvailability aussi, sur toute la journée, minute par minute
+    for (let minute = 0; minute < 24 * 60; minute += 5) {
+      const now = new Date(Date.UTC(2026, 8, 21, 0, minute))
+      const refused = (() => {
+        try {
+          planOrder({ now, partnerHours: lunchOnly, rules: DEFAULT_SCHEDULE_RULES })
+          return false
+        } catch {
+          return true
+        }
+      })()
+
+      expect(explain(now, { partnerHours: lunchOnly }).available).toBe(!refused)
+    }
   })
 })
 

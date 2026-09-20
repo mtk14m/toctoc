@@ -12,7 +12,8 @@ import { authRoutes } from './routes/auth.js'
 import { groupOrderRoutes } from './routes/group-orders.js'
 import { healthRoutes } from './routes/health.js'
 import { orderItemRoutes } from './routes/order-items.js'
-import { adminPartnerRoutes, partnerRoutes } from './routes/partners.js'
+import { adminPartnerRoutes } from './routes/partners.js'
+import { restaurantRoutes } from './routes/restaurants.js'
 import { webhookRoutes } from './routes/webhooks.js'
 import { createAuthService } from './services/auth.js'
 import { createClosingService, type ClosingService } from './services/closing.js'
@@ -21,6 +22,7 @@ import { createOrderItemService } from './services/order-item.js'
 import { createOtpService } from './services/otp.js'
 import { createPartnerService } from './services/partner.js'
 import { createPaymentService } from './services/payment.js'
+import { createRestaurantService } from './services/restaurant.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -106,6 +108,11 @@ export async function buildApp(config: Config, deps: AppDeps) {
     rateLimiter: deps.rateLimiter,
     defaultCountryCode: config.defaultCountryCode,
   })
+  const restaurants = createRestaurantService({
+    store: deps.restaurantStore,
+    rules: config.schedule,
+    ...(deps.now && { now: deps.now }),
+  })
   const partners = createPartnerService({
     store: deps.partnerStore,
     defaultCountryCode: config.defaultCountryCode,
@@ -121,7 +128,7 @@ export async function buildApp(config: Config, deps: AppDeps) {
   })
   await app.register(groupOrderRoutes, { prefix: '/group-orders', groupOrders })
   await app.register(orderItemRoutes, { prefix: '/group-orders', orderItems })
-  await app.register(partnerRoutes, { prefix: '/partners', partners })
+  await app.register(restaurantRoutes, { prefix: '/restaurants', restaurants })
   await app.register(adminPartnerRoutes, { prefix: '/admin', partners })
   await app.register(webhookRoutes, { prefix: '/webhooks', payments })
 
