@@ -48,8 +48,8 @@ stateDiagram-v2
 | `OPEN` | On peut la rejoindre, choisir son plat et payer. Le groupe voit la liste se remplir en direct. | oui |
 | `CLOSED` | L'heure est passée. Les parts encore en attente de paiement sont annulées ; **les plats payés sont validés** et le récap part chez le restaurant. | oui (mode `SPLIT`) |
 | `CANCELLED` | L'heure est passée et **personne n'a payé** : elle expire, rien n'est envoyé au restaurant, **il faut recommencer à zéro** (nouvelle commande, nouveau lien). | oui (mode `SPLIT`) |
-| `IN_DELIVERY` | Un livreur est en route ; le groupe voit un code à lui donner à l'arrivée. | pas encore |
-| `DELIVERED` | Le code a été saisi : la livraison est prouvée. On peut noter le restaurant. | pas encore |
+| `IN_DELIVERY` | Un livreur est en route ; le groupe voit un code à lui donner à l'arrivée. | oui |
+| `DELIVERED` | Le code a été saisi : la livraison est prouvée. On peut noter le restaurant (pas encore construit). | oui |
 
 Une commande expirée ne se rouvre jamais. Pour la refaire, on en commence une nouvelle : même restaurant, même adresse, en un geste.
 

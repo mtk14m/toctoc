@@ -37,6 +37,17 @@ export interface ServerToClientEvents {
    * CANCELLED quand personne n'a payé (pas de livraison).
    */
   'groupOrder:closed': (payload: { status: 'CLOSED' | 'CANCELLED' }) => void
+  /**
+   * Room du lien. Le livreur a récupéré les plats : le groupe voit « en route » et le code à lui
+   * donner à l'arrivée. C'est la preuve de livraison (docs/09) : elle ne circule que sur la page
+   * que les participants ont déjà ouverte.
+   */
+  'groupOrder:in_delivery': (payload: {
+    confirmationCode: string
+    estimatedMinutes: number
+  }) => void
+  /** Room du lien. Le code a été saisi (ou l'équipe a confirmé) : la commande est livrée. */
+  'groupOrder:delivered': (payload: { deliveredAt: string }) => void
   /** Room de la commande : le message privé de la personne qui a commandé, jamais celui du groupe. */
   'orderItem:updated': (payload: {
     orderItemId: string

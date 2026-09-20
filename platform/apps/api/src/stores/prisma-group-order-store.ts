@@ -49,6 +49,7 @@ export class PrismaGroupOrderStore implements GroupOrderStore {
         paymentMode: true,
         creator: { select: { name: true } },
         partner: { select: { id: true, name: true, type: true } },
+        delivery: { select: { status: true, confirmationCode: true } },
       },
     })
     if (!order) return null

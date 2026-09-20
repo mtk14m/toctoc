@@ -394,6 +394,45 @@ describe('GroupOrderService', () => {
       expect(menu.map((m) => m.id)).not.toContain('menu_demain')
     })
 
+    describe('delivery — la preuve de livraison sur la page du groupe', () => {
+      const stored = (status: 'ASSIGNED' | 'PICKED_UP' | 'DELIVERED', code: string | null) => {
+        store.deliveryOf = () => ({ status, confirmationCode: code })
+      }
+
+      it('est absente tant qu’aucun livreur n’est assigné', async () => {
+        expect((await service.getByShareToken(shareToken)).delivery).toBeNull()
+      })
+
+      it('annonce le livreur assigné sans aucun code', async () => {
+        stored('ASSIGNED', null)
+
+        expect((await service.getByShareToken(shareToken)).delivery).toEqual({
+          status: 'ASSIGNED',
+          confirmationCode: null,
+        })
+      })
+
+      it('révèle le code à donner au livreur une fois les plats récupérés', async () => {
+        stored('PICKED_UP', '4821')
+
+        expect((await service.getByShareToken(shareToken)).delivery).toEqual({
+          status: 'PICKED_UP',
+          confirmationCode: '4821',
+        })
+      })
+
+      it('ne montre jamais le code hors de la phase « en route » : avant, il pourrait fuiter ; après, il ne sert plus', async () => {
+        stored('ASSIGNED', '4821')
+        expect((await service.getByShareToken(shareToken)).delivery?.confirmationCode).toBeNull()
+
+        stored('DELIVERED', '4821')
+        expect((await service.getByShareToken(shareToken)).delivery).toEqual({
+          status: 'DELIVERED',
+          confirmationCode: null,
+        })
+      })
+    })
+
     describe('participants', () => {
       beforeEach(() => {
         seedItem('Aïcha', 'Riz gras', 'CONFIRMED')

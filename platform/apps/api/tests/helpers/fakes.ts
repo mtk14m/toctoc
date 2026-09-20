@@ -30,6 +30,22 @@ import type {
 import type { CloseResult, ClosingStore, RecapCandidate } from '../../src/services/closing.js'
 import type { PartnerNotifier } from '../../src/services/partner-notifier.js'
 import type { RestaurantRecord, RestaurantStore } from '../../src/services/restaurant.js'
+import {
+  MAX_CONFIRMATION_ATTEMPTS,
+  type AssignResult,
+  type AttemptResult,
+  type DeliveryDetail,
+  type DeliveryStore,
+  type DriverRecord,
+  type OpsOrderRecord,
+  type OverrideResult,
+  type PickUpResult,
+} from '../../src/services/delivery.js'
+import type { DriverStore, DriverView, CreateDriverResult } from '../../src/services/driver.js'
+import type {
+  DeliveryStatus,
+  GroupOrderStatus as OrderStatus,
+} from '../../src/generated/prisma/enums.js'
 import type { RealtimePublisher, ServerToClientEvents } from '../../src/realtime/events.js'
 import type {
   MenuItemRecord,
@@ -144,6 +160,10 @@ export class InMemoryGroupOrderStore implements GroupOrderStore {
     NewGroupOrder & { id: string; status: GroupOrderStatus; partnerNotifiedAt?: Date | null }
   > = []
   private sequence = 0
+  /** Relié au store de livraison par `createTestDeps` : la page du groupe lit l'état de la livraison. */
+  deliveryOf: (
+    groupOrderId: string,
+  ) => { status: DeliveryStatus; confirmationCode: string | null } | null = () => null
 
   /** Le nom du créateur vient des utilisateurs : en base, c'est une jointure. */
   constructor(private readonly users: InMemoryUserStore) {}
@@ -177,6 +197,7 @@ export class InMemoryGroupOrderStore implements GroupOrderStore {
       paymentMode: order.paymentMode,
       creatorName: creator.name,
       partner: { id: partner.id, name: partner.name, type: partner.type },
+      delivery: this.deliveryOf(order.id),
     }
   }
 
@@ -490,6 +511,268 @@ export class InMemoryClosingStore implements ClosingStore {
   }
 }
 
+/**
+ * La livraison et les livreurs, sur l'état partagé des commandes : assigner, récupérer ou confirmer
+ * change la commande, comme en base. Sans `await` entre lecture et écriture, donc atomique.
+ */
+export class InMemoryDeliveryStore implements DeliveryStore, DriverStore {
+  drivers: Array<{ id: string; userId: string; active: boolean }> = []
+  deliveries: Array<{
+    id: string
+    groupOrderId: string
+    driverId: string | null
+    status: DeliveryStatus
+    confirmationCode: string | null
+    confirmationAttempts: number
+    pickedUpAt: Date | null
+    deliveredAt: Date | null
+    deliveredByOverride: boolean
+  }> = []
+  auditLogs: Array<{
+    actorId: string
+    action: string
+    targetType: string
+    targetId: string
+    metadata: unknown
+  }> = []
+  /** Adresse et téléphone du restaurant, par partenaire ; des valeurs par défaut pour les tests. */
+  partnerContacts = new Map<string, { address: string; phone: string }>()
+  private sequence = 0
+
+  constructor(
+    private readonly groups: InMemoryGroupOrderStore,
+    private readonly users: InMemoryUserStore,
+  ) {}
+
+  /** Aide de test : un compte livreur complet, prêt à être assigné. */
+  async addDriver(input: { phone: string; name: string }): Promise<{ id: string; userId: string }> {
+    const user = await this.users.create(input)
+    user.role = 'DRIVER'
+    this.sequence += 1
+    const driver = { id: `driver_${this.sequence}`, userId: user.id, active: true }
+    this.drivers.push(driver)
+    return { id: driver.id, userId: user.id }
+  }
+
+  async findDriverById(id: string): Promise<DriverRecord | null> {
+    return this.drivers.find((d) => d.id === id) ?? null
+  }
+
+  async findDriverByUserId(userId: string): Promise<DriverRecord | null> {
+    return this.drivers.find((d) => d.userId === userId) ?? null
+  }
+
+  private viewOf(driver: { id: string; userId: string; active: boolean }): DriverView {
+    const user = this.users.users.find((u) => u.id === driver.userId)!
+    return {
+      id: driver.id,
+      userId: user.id,
+      name: user.name,
+      phone: user.phone,
+      active: driver.active,
+    }
+  }
+
+  async createDriver(input: { phone: string; name: string }): Promise<CreateDriverResult> {
+    const user = await this.users.findOrCreateByPhone(input)
+    // Le numéro de l'équipe (ou d'un autre livreur déjà promu) ne se réutilise pas en silence.
+    if (user.role === 'ADMIN_PLATFORM') return { status: 'phone_in_use' }
+
+    const existing = this.drivers.find((d) => d.userId === user.id)
+    if (existing) return { status: 'existing', driver: this.viewOf(existing) }
+
+    user.role = 'DRIVER'
+    this.sequence += 1
+    const driver = { id: `driver_${this.sequence}`, userId: user.id, active: true }
+    this.drivers.push(driver)
+    return { status: 'created', driver: this.viewOf(driver) }
+  }
+
+  async listDrivers(): Promise<DriverView[]> {
+    return this.drivers.map((d) => this.viewOf(d))
+  }
+
+  private detailOf(delivery: (typeof this.deliveries)[number]): DeliveryDetail {
+    const order = this.groups.groupOrders.find((o) => o.id === delivery.groupOrderId)!
+    const partner = this.groups.partners.find((p) => p.id === order.partnerId)!
+    const creator = this.users.users.find((u) => u.id === order.creatorId)!
+    const contact = this.partnerContacts.get(partner.id) ?? {
+      address: 'Almamya',
+      phone: '+224622000000',
+    }
+    return {
+      id: delivery.id,
+      status: delivery.status,
+      driverId: delivery.driverId,
+      groupOrder: {
+        id: order.id,
+        deliveryAddress: order.deliveryAddress,
+        deliveryTime: order.deliveryTime,
+        creator: { name: creator.name, phone: creator.phone },
+        restaurant: { name: partner.name, ...contact },
+        items: this.groups.orderItems
+          .filter((i) => i.groupOrderId === order.id && i.status === 'CONFIRMED')
+          .map((i) => ({ dish: i.menuItemName, quantity: i.quantity })),
+      },
+    }
+  }
+
+  async assign(input: {
+    groupOrderId: string
+    driverId: string
+    actorId: string
+  }): Promise<AssignResult> {
+    const order = this.groups.groupOrders.find((o) => o.id === input.groupOrderId)
+    if (!order) return { status: 'order_not_found' }
+
+    const existing = this.deliveries.find((d) => d.groupOrderId === order.id)
+    if (existing && existing.status !== 'ASSIGNED') return { status: 'already_started' }
+    if (!existing && order.status !== 'CLOSED') return { status: 'order_not_ready' }
+
+    let delivery = existing
+    if (!delivery) {
+      this.sequence += 1
+      delivery = {
+        id: `delivery_${this.sequence}`,
+        groupOrderId: order.id,
+        driverId: input.driverId,
+        status: 'ASSIGNED',
+        confirmationCode: null,
+        confirmationAttempts: 0,
+        pickedUpAt: null,
+        deliveredAt: null,
+        deliveredByOverride: false,
+      }
+      this.deliveries.push(delivery)
+    } else {
+      delivery.driverId = input.driverId
+    }
+    this.auditLogs.push({
+      actorId: input.actorId,
+      action: 'delivery.driver_assigned',
+      targetType: 'Delivery',
+      targetId: delivery.id,
+      metadata: { groupOrderId: order.id, driverId: input.driverId },
+    })
+    return { status: existing ? 'reassigned' : 'assigned', deliveryId: delivery.id }
+  }
+
+  async listForDriver(driverId: string): Promise<DeliveryDetail[]> {
+    return this.deliveries
+      .filter(
+        (d) => d.driverId === driverId && (d.status === 'ASSIGNED' || d.status === 'PICKED_UP'),
+      )
+      .map((d) => this.detailOf(d))
+      .sort((a, b) => a.groupOrder.deliveryTime.getTime() - b.groupOrder.deliveryTime.getTime())
+  }
+
+  async findForDriver(deliveryId: string, driverId: string): Promise<DeliveryDetail | null> {
+    const delivery = this.deliveries.find((d) => d.id === deliveryId && d.driverId === driverId)
+    return delivery ? this.detailOf(delivery) : null
+  }
+
+  async pickUp(input: {
+    deliveryId: string
+    driverId: string
+    code: string
+    at: Date
+  }): Promise<PickUpResult> {
+    const delivery = this.deliveries.find(
+      (d) => d.id === input.deliveryId && d.driverId === input.driverId,
+    )
+    if (!delivery) return { status: 'not_found' }
+    if (delivery.status !== 'ASSIGNED') return { status: 'invalid_state' }
+
+    delivery.status = 'PICKED_UP'
+    delivery.confirmationCode = input.code
+    delivery.pickedUpAt = input.at
+    const order = this.groups.groupOrders.find((o) => o.id === delivery.groupOrderId)!
+    order.status = 'IN_DELIVERY'
+    return { status: 'picked_up', groupOrderId: order.id, deliveryTime: order.deliveryTime }
+  }
+
+  async registerAttempt(input: { deliveryId: string; driverId: string }): Promise<AttemptResult> {
+    const delivery = this.deliveries.find(
+      (d) => d.id === input.deliveryId && d.driverId === input.driverId,
+    )
+    if (!delivery) return { status: 'not_found' }
+    if (delivery.status !== 'PICKED_UP') return { status: 'invalid_state' }
+    if (delivery.confirmationAttempts >= MAX_CONFIRMATION_ATTEMPTS) return { status: 'locked' }
+
+    delivery.confirmationAttempts += 1
+    return {
+      status: 'counted',
+      attempts: delivery.confirmationAttempts,
+      code: delivery.confirmationCode!,
+    }
+  }
+
+  async complete(input: {
+    deliveryId: string
+    at: Date
+  }): Promise<{ groupOrderId: string } | null> {
+    const delivery = this.deliveries.find((d) => d.id === input.deliveryId)
+    if (!delivery || delivery.status !== 'PICKED_UP') return null
+
+    delivery.status = 'DELIVERED'
+    delivery.deliveredAt = input.at
+    this.groups.groupOrders.find((o) => o.id === delivery.groupOrderId)!.status = 'DELIVERED'
+    return { groupOrderId: delivery.groupOrderId }
+  }
+
+  async override(input: {
+    deliveryId: string
+    actorId: string
+    reason: string
+    at: Date
+  }): Promise<OverrideResult> {
+    const delivery = this.deliveries.find((d) => d.id === input.deliveryId)
+    if (!delivery) return { status: 'not_found' }
+    if (delivery.status === 'DELIVERED') return { status: 'already_delivered' }
+
+    delivery.status = 'DELIVERED'
+    delivery.deliveredAt = input.at
+    delivery.deliveredByOverride = true
+    this.groups.groupOrders.find((o) => o.id === delivery.groupOrderId)!.status = 'DELIVERED'
+    // Jamais silencieux : le contournement laisse toujours une trace, avec sa raison.
+    this.auditLogs.push({
+      actorId: input.actorId,
+      action: 'delivery.manual_override',
+      targetType: 'Delivery',
+      targetId: delivery.id,
+      metadata: { reason: input.reason },
+    })
+    return { status: 'overridden', groupOrderId: delivery.groupOrderId }
+  }
+
+  async listOrders(statuses: OrderStatus[]): Promise<OpsOrderRecord[]> {
+    return this.groups.groupOrders
+      .filter((o) => statuses.includes(o.status))
+      .map((order) => {
+        const delivery = this.deliveries.find((d) => d.groupOrderId === order.id)
+        const driver = delivery && this.drivers.find((d) => d.id === delivery.driverId)
+        return {
+          id: order.id,
+          status: order.status,
+          restaurantName: this.groups.partners.find((p) => p.id === order.partnerId)!.name,
+          deliveryAddress: order.deliveryAddress,
+          orderCutoffTime: order.orderCutoffTime,
+          deliveryTime: order.deliveryTime,
+          items: this.groups.orderItems
+            .filter((i) => i.groupOrderId === order.id && i.status === 'CONFIRMED')
+            .map((i) => ({ dish: i.menuItemName, quantity: i.quantity })),
+          delivery: delivery
+            ? {
+                id: delivery.id,
+                status: delivery.status,
+                driver: driver ? { id: driver.id, name: this.viewOf(driver).name } : null,
+              }
+            : null,
+        }
+      })
+  }
+}
+
 export class RecordingPartnerNotifier implements PartnerNotifier {
   sent: Array<{ partner: { name: string; phone: string }; message: string }> = []
   /** Tout envoi échoue. */
@@ -647,6 +930,13 @@ export function createTestDeps() {
   const groupOrderStore = new InMemoryGroupOrderStore(userStore)
   const paymentStore = new InMemoryPaymentStore(groupOrderStore)
   const partnerStore = new InMemoryPartnerStore()
+  const deliveryStore = new InMemoryDeliveryStore(groupOrderStore, userStore)
+  groupOrderStore.deliveryOf = (groupOrderId) => {
+    const delivery = deliveryStore.deliveries.find((d) => d.groupOrderId === groupOrderId)
+    return delivery
+      ? { status: delivery.status, confirmationCode: delivery.confirmationCode }
+      : null
+  }
   return {
     otpStore: new InMemoryOtpStore(),
     userStore,
@@ -658,6 +948,8 @@ export function createTestDeps() {
     partnerNotifier: new RecordingPartnerNotifier(),
     partnerStore,
     restaurantStore: new InMemoryRestaurantStore(partnerStore),
+    deliveryStore,
+    driverStore: deliveryStore,
     rateLimiter: new InMemoryRateLimiter(),
     otpSender: new RecordingOtpSender(),
   } satisfies AppDeps

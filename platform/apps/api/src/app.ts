@@ -11,12 +11,15 @@ import { attachSocketServer } from './realtime/socket-server.js'
 import { authRoutes } from './routes/auth.js'
 import { groupOrderRoutes } from './routes/group-orders.js'
 import { healthRoutes } from './routes/health.js'
+import { adminDeliveryRoutes, driverRoutes } from './routes/deliveries.js'
 import { orderItemRoutes } from './routes/order-items.js'
 import { adminPartnerRoutes } from './routes/partners.js'
 import { restaurantRoutes } from './routes/restaurants.js'
 import { webhookRoutes } from './routes/webhooks.js'
 import { createAuthService } from './services/auth.js'
 import { createClosingService, type ClosingService } from './services/closing.js'
+import { createDeliveryService } from './services/delivery.js'
+import { createDriverService } from './services/driver.js'
 import { createGroupOrderService } from './services/group-order.js'
 import { createOrderItemService } from './services/order-item.js'
 import { createOtpService } from './services/otp.js'
@@ -100,6 +103,15 @@ export async function buildApp(config: Config, deps: AppDeps) {
       onError: (err) => app.log.error({ err }, 'clôture : un lien n’a pas pu être traité'),
     }),
   )
+  const deliveries = createDeliveryService({
+    store: deps.deliveryStore,
+    realtime,
+    onError: (err) => app.log.error({ err }, 'livraison : annonce impossible'),
+  })
+  const drivers = createDriverService({
+    store: deps.driverStore,
+    defaultCountryCode: config.defaultCountryCode,
+  })
   const orderItems = createOrderItemService({
     store: deps.orderItemStore,
     users: deps.userStore,
@@ -130,6 +142,8 @@ export async function buildApp(config: Config, deps: AppDeps) {
   await app.register(orderItemRoutes, { prefix: '/group-orders', orderItems })
   await app.register(restaurantRoutes, { prefix: '/restaurants', restaurants })
   await app.register(adminPartnerRoutes, { prefix: '/admin', partners })
+  await app.register(adminDeliveryRoutes, { prefix: '/admin', deliveries, drivers })
+  await app.register(driverRoutes, { prefix: '/driver', deliveries, drivers })
   await app.register(webhookRoutes, { prefix: '/webhooks', payments })
 
   return app
