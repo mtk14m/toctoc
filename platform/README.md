@@ -180,6 +180,21 @@ le code n'y figure que pendant `PICKED_UP`. En direct, `groupOrder:in_delivery` 
 estimé) puis `groupOrder:delivered`. Le rôle est relu en base à chaque appel : un livreur désactivé est refusé
 immédiatement, sans attendre l'expiration de son jeton.
 
+## La notation et les remboursements
+
+Une fois la commande livrée, la page propose de noter le restaurant (`groupOrder:rating_open` en direct).
+Pas de compte : le numéro de la part suffit, comme pour rejoindre.
+
+| Qui    | Route                                                       | Rôle                                                                               |
+| ------ | ----------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Public | `POST /order-items/:id/rating` `{ phone, score }`           | note de 1 à 5, une fois par part payée et livrée ; renvoie la moyenne du jour      |
+| Équipe | `GET /admin/refunds`                                        | paiements encaissés pour une part annulée (débit tardif), les plus anciens d'abord |
+| Équipe | `POST /admin/refunds/:orderItemId/refunded` `{ reference }` | garde la référence du remboursement mobile money dans l'`AuditLog`                 |
+
+La moyenne est sur la page publique (`rating: { average, count }`, `null` tant que personne n'a noté) et en
+direct (`groupOrder:rating_added`) ; celle du restaurant, dans l'annuaire, vient des mêmes notes. Le
+remboursement reste manuel : l'équipe rembourse par mobile money, puis enregistre la référence ici.
+
 ## La clôture des liens et le récap partenaire
 
 Un job BullMQ tourne chaque minute au démarrage de l'API (Redis requis). Pour chaque lien `SPLIT` dont l'heure

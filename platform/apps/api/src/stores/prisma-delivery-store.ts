@@ -284,7 +284,10 @@ export class PrismaDeliveryStore implements DeliveryStore, DriverStore {
     })
   }
 
-  complete(input: { deliveryId: string; at: Date }): Promise<{ groupOrderId: string } | null> {
+  complete(input: {
+    deliveryId: string
+    at: Date
+  }): Promise<{ groupOrderId: string; restaurantName: string } | null> {
     return this.db.$transaction(async (tx) => {
       const ref = await tx.delivery.findUnique({
         where: { id: input.deliveryId },
@@ -299,8 +302,12 @@ export class PrismaDeliveryStore implements DeliveryStore, DriverStore {
       })
       if (count !== 1) return null
 
-      await tx.groupOrder.update({ where: { id: ref.groupOrderId }, data: { status: 'DELIVERED' } })
-      return { groupOrderId: ref.groupOrderId }
+      const order = await tx.groupOrder.update({
+        where: { id: ref.groupOrderId },
+        data: { status: 'DELIVERED' },
+        select: { partner: { select: { name: true } } },
+      })
+      return { groupOrderId: ref.groupOrderId, restaurantName: order.partner.name }
     })
   }
 
@@ -324,7 +331,11 @@ export class PrismaDeliveryStore implements DeliveryStore, DriverStore {
       })
       if (count !== 1) return { status: 'already_delivered' as const }
 
-      await tx.groupOrder.update({ where: { id: ref.groupOrderId }, data: { status: 'DELIVERED' } })
+      const order = await tx.groupOrder.update({
+        where: { id: ref.groupOrderId },
+        data: { status: 'DELIVERED' },
+        select: { partner: { select: { name: true } } },
+      })
       // Dans la même transaction : un contournement sans trace ne peut pas exister.
       await tx.auditLog.create({
         data: {
@@ -335,7 +346,11 @@ export class PrismaDeliveryStore implements DeliveryStore, DriverStore {
           metadata: { reason: input.reason },
         },
       })
-      return { status: 'overridden' as const, groupOrderId: ref.groupOrderId }
+      return {
+        status: 'overridden' as const,
+        groupOrderId: ref.groupOrderId,
+        restaurantName: order.partner.name,
+      }
     })
   }
 

@@ -168,15 +168,19 @@ sequenceDiagram
     participant Collegue as Collègue (page du lien, toujours ouverte)
 
     API-->>API: GroupOrder.status=DELIVERED
-    API->>WS: emit groupOrder:rating_open { partnerName }
+    API->>WS: emit groupOrder:rating_open { restaurantName }
     WS-->>Collegue: la page propose de noter le partenaire (1 à 5), par OrderItem
-    Collegue->>API: POST /order-items/{id}/rating { score }
+    Collegue->>API: POST /order-items/{id}/rating { phone, score }
     API-->>API: crée Rating(orderItemId, partnerId, score)
-    API->>WS: emit groupOrder:rating_added { averageScore, count }
+    API->>WS: emit groupOrder:rating_added { average, count }
     WS-->>Collegue: moyenne du jour mise à jour pour tout le monde encore sur la page
 ```
 
 Même schéma technique que les deux moments waouh précédents : une room déjà ouverte, un événement de plus, pas un nouveau canal ([07-architecture-mvp.md](07-architecture-mvp.md)). Facultatif pour le participant — une commande non notée n'a aucune conséquence, ni pour lui ni pour le partenaire.
+
+**État du code** (`services/rating.ts`). Le participant n'a pas de compte, comme pour rejoindre : la route est publique et le **numéro de la part** prouve que c'est la sienne. Un numéro qui ne correspond pas répond exactement comme une part inconnue (404), pour qu'on ne puisse pas sonder les parts des autres. On ne note que ce qu'on a payé (`CONFIRMED`) et reçu (commande `DELIVERED`), une seule fois par part (`ALREADY_RATED`, garanti par la contrainte d'unicité de la base). La moyenne est arrondie à une décimale, et la page du lien la porte (`rating`, `null` tant que personne n'a noté) ; la note du restaurant dans l'annuaire vient des mêmes lignes.
+
+**Les remboursements, à la main en Phase 1.** Un débit qui arrive après la fermeture est encaissé mais sa part est annulée (voir plus haut, `PAYMENT_TOO_LATE`). `GET /admin/refunds` liste ces paiements avec de quoi rembourser (montant, référence de l'opérateur, nom et numéro de la personne), les plus anciens d'abord. Une fois la personne remboursée par mobile money, `POST /admin/refunds/:orderItemId/refunded` garde la référence de l'opération dans l'`AuditLog` (`order_item.refunded`), sous verrou : deux clics simultanés ne l'enregistrent qu'une fois.
 
 ## Ce que ces quatre workflows n'incluent pas, volontairement
 

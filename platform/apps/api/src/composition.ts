@@ -16,6 +16,8 @@ import { PrismaOrderItemStore } from './stores/prisma-order-item-store.js'
 import { PrismaOtpStore } from './stores/prisma-otp-store.js'
 import { PrismaPartnerStore } from './stores/prisma-partner-store.js'
 import { PrismaPaymentStore } from './stores/prisma-payment-store.js'
+import { PrismaRatingStore } from './stores/prisma-rating-store.js'
+import { PrismaRefundStore } from './stores/prisma-refund-store.js'
 import { PrismaRestaurantStore } from './stores/prisma-restaurant-store.js'
 import { PrismaUserStore } from './stores/prisma-user-store.js'
 
@@ -52,6 +54,8 @@ export function createProductionDeps(config: Config): AppDeps {
     restaurantStore: new PrismaRestaurantStore(prisma),
     deliveryStore,
     driverStore: deliveryStore,
+    ratingStore: new PrismaRatingStore(prisma),
+    refundStore: new PrismaRefundStore(prisma),
     paymentStore: new PrismaPaymentStore(prisma),
     paymentGateway: createPaymentGateway(config),
     closingStore: new PrismaClosingStore(prisma),
