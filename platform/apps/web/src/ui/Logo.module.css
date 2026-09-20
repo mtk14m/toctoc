@@ -1,0 +1,33 @@
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.6rem;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.knock {
+  width: 1.6rem;
+  height: 1.6rem;
+  fill: var(--sun);
+  stroke: var(--ink);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.knock path {
+  fill: none;
+}
+
+.knock circle {
+  fill: var(--ink);
+  stroke: none;
+}
+
+.word span {
+  color: var(--tomato);
+}

@@ -1,0 +1,22 @@
+.footer {
+  padding-block: var(--space-6);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+/* Le logo est fait pour un fond clair : on lui rend un contour lisible sur l'encre. */
+.footer svg {
+  stroke: var(--paper);
+}
+
+.footer p {
+  font-weight: 600;
+}

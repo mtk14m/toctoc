@@ -1,0 +1,60 @@
+.hero {
+  padding-block: var(--space-7) var(--space-8);
+  overflow-x: clip;
+}
+
+.inner {
+  display: grid;
+  align-items: center;
+  gap: var(--space-7);
+}
+
+@media (min-width: 60rem) {
+  .inner {
+    grid-template-columns: 1.15fr 0.85fr;
+  }
+}
+
+.copy {
+  display: grid;
+  gap: var(--space-5);
+  justify-items: start;
+}
+
+.kicker {
+  padding: 0.3rem 0.8rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-pill);
+  background: var(--sun-soft);
+  font-size: var(--text-sm);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.title {
+  font-size: var(--text-hero);
+  line-height: 0.95;
+}
+
+/* Le surlignage au feutre : une bande jaune décalée derrière les mots. */
+.mark {
+  background: linear-gradient(transparent 58%, var(--sun) 58% 92%, transparent 92%);
+  padding-inline: 0.1em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.lead {
+  max-width: 34rem;
+  color: var(--ink-soft);
+  font-size: var(--text-lg);
+  font-weight: 500;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "api": "pnpm --filter @toctoc/api dev",
+    "web": "pnpm --filter @toctoc/web dev",
     "test": "pnpm -r test:run",
     "typecheck": "pnpm -r typecheck",
     "format": "prettier --write .",

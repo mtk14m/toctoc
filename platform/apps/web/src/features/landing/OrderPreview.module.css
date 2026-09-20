@@ -1,0 +1,165 @@
+.wrap {
+  position: relative;
+  padding: var(--space-4);
+}
+
+.card {
+  display: grid;
+  gap: var(--space-4);
+  background: var(--card);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.restaurant {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.live {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--tomato);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.people {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+
+.fresh {
+  animation: pop-in 700ms cubic-bezier(0.2, 1.4, 0.4, 1) 500ms both;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  font-family: var(--font-display);
+  font-weight: 800;
+}
+
+.who {
+  display: grid;
+  flex: 1;
+  line-height: 1.25;
+  font-size: var(--text-sm);
+}
+
+.who strong {
+  font-size: var(--text-base);
+}
+
+.paid {
+  color: var(--leaf);
+  font-size: var(--text-sm);
+  font-weight: 800;
+  filter: brightness(0.7);
+}
+
+.footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 2.5px dashed var(--ink);
+  font-weight: 600;
+}
+
+.footer strong {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+}
+
+.badge {
+  position: absolute;
+  right: -0.25rem;
+  bottom: -0.9rem;
+  padding: 0.4rem 0.9rem;
+  border: var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--leaf);
+  box-shadow: var(--shadow);
+  font-family: var(--font-display);
+  font-weight: 800;
+  transform: rotate(-6deg);
+}
+
+.burst {
+  position: absolute;
+  top: -0.6rem;
+  left: -0.4rem;
+  width: 3.4rem;
+  height: 3.4rem;
+  background: var(--sun);
+  border: var(--line);
+  clip-path: polygon(
+    50% 0%,
+    61% 18%,
+    80% 10%,
+    79% 31%,
+    100% 35%,
+    85% 51%,
+    100% 66%,
+    79% 70%,
+    80% 90%,
+    61% 82%,
+    50% 100%,
+    39% 82%,
+    20% 90%,
+    21% 70%,
+    0% 66%,
+    15% 51%,
+    0% 35%,
+    21% 31%,
+    20% 10%,
+    39% 18%
+  );
+  animation: spin 14s linear infinite;
+}
+
+@keyframes pulse {
+  50% {
+    transform: scale(1.5);
+    opacity: 0.55;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem) scale(0.92);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

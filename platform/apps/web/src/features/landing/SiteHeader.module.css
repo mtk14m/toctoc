@@ -1,0 +1,38 @@
+.header {
+  padding-block: var(--space-4);
+}
+
+.inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.home {
+  text-decoration: none;
+}
+
+.nav {
+  display: none;
+  gap: var(--space-5);
+  margin-left: auto;
+  font-weight: 700;
+}
+
+.nav a {
+  text-decoration: none;
+}
+
+.nav a:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 3px;
+  text-underline-offset: 6px;
+  text-decoration-color: var(--tomato);
+}
+
+@media (min-width: 48rem) {
+  .nav {
+    display: flex;
+  }
+}
