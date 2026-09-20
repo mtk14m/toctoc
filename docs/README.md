@@ -2,6 +2,8 @@
 
 Statut : **développement de l'API en cours** (code dans [`../platform`](../platform/README.md)), sur la base de cette réflexion produit. Objectif : concevoir un produit qui peut gagner dans un marché déjà disputé par des acteurs mieux capitalisés, sans les affronter de front.
 
+> **Au centre de tout : [la commande](12-la-commande.md).** Ce que c'est, ses règles, sa vie, le vocabulaire à employer. À lire en premier si tu ne devais en lire qu'un.
+
 ## Lecture recommandée, dans l'ordre
 
 1. [00-vision.md](00-vision.md) — le problème, l'insight stratégique, ce que TocToc est vraiment
@@ -16,6 +18,7 @@ Statut : **développement de l'API en cours** (code dans [`../platform`](../plat
 10. [09-workflows.md](09-workflows.md) — les workflows achat, réception de commande par le partenaire, livraison, et notation
 11. [10-benchmark-produit-mondial.md](10-benchmark-produit-mondial.md) — ce que font DoorDash, la Chine, le Brésil et l'Asie du Sud-Est, et ce qu'on en tire
 12. [11-reference-chowdeck.md](11-reference-chowdeck.md) — notre référence de terrain la plus proche, mise à jour au fil du temps
+13. [12-la-commande.md](12-la-commande.md) — **la commande**, l'objet central : définition, règles, cycle de vie, vocabulaire
 
 ## Décisions déjà actées
 
