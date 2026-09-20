@@ -4,6 +4,33 @@ Décision actée : TocToc ne démarre pas avec une application de livraison comp
 
 Cette fonctionnalité doit être conçue pour produire un **effet waouh** — pas seulement fonctionner, mais surprendre agréablement et donner envie d'en parler. C'est ce qui transforme une commande groupée ordinaire en mécanique virale bottom-up (voir l'insight de [00-vision.md](00-vision.md)) : sans le waouh, ce n'est qu'un panier partagé de plus, copiable en un sprint par n'importe quel concurrent.
 
+## Le principe : un restaurant, puis solo ou groupé
+
+Décidé le 2026-09-20. Le parcours commence par **le choix d'un restaurant** (ou d'une cuisinière) parmi les partenaires de TocToc. Ensuite, deux façons de commander chez lui, **livrées de la même manière** :
+
+- **Seul.** Une commande d'une personne, sans partager quoi que ce soit.
+- **En groupe.** La personne qui commence partage son lien à ses collègues, qui la rejoignent. **Le groupage ne se fait que par ce lien** : l'application ne propose pas de « groupes ouverts » à rejoindre (à réévaluer une fois observé si les gens se regroupent d'eux-mêmes).
+
+**Une commande porte sur un seul restaurant, jamais deux.** Quelqu'un qui veut un autre restaurant lance sa propre commande, que d'autres peuvent à leur tour rejoindre. Plusieurs commandes coexistent donc dans un même immeuble, une par restaurant (voir [08-schema-donnees.md](08-schema-donnees.md)). La raison est concrète : un lien, c'est un seul retrait chez le restaurant et un seul passage du livreur — c'est aussi ce qui rend possible le tarif de livraison dégressif ([04-modele-economique.md](04-modele-economique.md)).
+
+**Le mode solo n'est pas une livraison à la demande.** C'est une commande de groupe dont personne d'autre n'a rejoint le lien : même compte à rebours, même livraison que n'importe quelle autre ; frais de livraison du premier palier (le plus élevé, ce qui donne une raison de se regrouper). La livraison à la demande reste une Phase 3 ([03-roadmap-phases.md](03-roadmap-phases.md)).
+
+**La commande reste ouverte 20 minutes.** Dès qu'on la commence, un compte à rebours de **20 minutes** démarre : tous ceux qui veulent en être doivent commander dans ce délai (choisir leur plat et payer). À la fin, la commande se ferme, le restaurant reçoit ce qu'il doit préparer, puis la livraison suit. **Personne ne choisit d'heure** : l'heure de fermeture est « maintenant + 20 minutes », et la livraison est estimée **45 minutes plus tard** (préparation et trajet, réglable). C'est ce compte à rebours partagé qui crée l'urgence et le rituel décrits en [§5](#5-le-compte-à-rebours-commun--le-moment-waouh-n3).
+
+**Quand la commande expire :**
+
+- **Si au moins une personne a payé**, la commande est **validée avec les plats payés**. Les parts encore en attente de paiement sont annulées ; seuls les plats réellement payés partent au restaurant et sont livrés.
+- **Si personne n'a payé**, la commande **expire** : elle est annulée, rien n'est envoyé au restaurant, et **il faut recommencer à zéro** (une nouvelle commande, un nouveau lien, une nouvelle fenêtre de 20 minutes). Le lien expiré ne se rouvre pas.
+
+Une courte fenêtre de grâce de 2 minutes laisse aboutir les paiements déjà lancés au moment de la fermeture ([09-workflows.md](09-workflows.md)).
+
+**Les horaires de service : de 9h à minuit.** TocToc vise les heures de bureau, du matin à la soirée, et les équipes qui travaillent tard (réunions, échéances) — jamais au-delà de minuit (heure de Conakry, sans heure d'été). On commence une commande entre 9h et minuit, à condition qu'elle puisse être livrée avant minuit : la dernière part à 22h54, avec les valeurs par défaut. Deux conséquences :
+
+- **Le service peut être réduit, partenaire par partenaire.** Un restaurant ou une cuisinière n'est proposé que sur les heures où il sert, et il doit être ouvert **quand il reçoit la commande**, c'est-à-dire à la fermeture du lien (une cuisinière peut ne faire que le déjeuner). Il n'y a pas de règle globale de « service réduit » : c'est l'offre des partenaires qui détermine ce qui est possible à chaque heure. Un restaurant sans plat au menu ce jour-là n'est pas proposé.
+- **Le vendredi n'est plus un cas particulier.** Le décalage de la pause de prière ([03-roadmap-phases.md](03-roadmap-phases.md)) n'a pas à être codé : on commande quand on veut, dans les heures de service.
+
+**Une limite voulue, à ne pas « corriger ».** Deux collègues qui lancent chacun une commande chez le même restaurant sans se voir paient chacun le frais du premier palier : TocToc ne les rapproche pas, et l'interface ne les avertit pas. C'est voulu — le coût les pousse à **se passer le mot avant de commander**, ce qui joue sur l'effet de groupe que le produit cherche à créer. Pas de message d'atténuation, pas de détection de doublons ; à réexaminer seulement si les données de la Phase 0 montrent que ça fait fuir plutôt que rassembler.
+
 ## Le parcours, étape par étape
 
 ### 1. Créer et partager

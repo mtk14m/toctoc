@@ -2,6 +2,8 @@
 
 Statut : **développement de l'API en cours** (code dans [`../platform`](../platform/README.md)), sur la base de cette réflexion produit. Objectif : concevoir un produit qui peut gagner dans un marché déjà disputé par des acteurs mieux capitalisés, sans les affronter de front.
 
+> **Au centre de tout : [la commande](12-la-commande.md).** Ce que c'est, ses règles, sa vie, le vocabulaire à employer. À lire en premier si tu ne devais en lire qu'un.
+
 ## Lecture recommandée, dans l'ordre
 
 1. [00-vision.md](00-vision.md) — le problème, l'insight stratégique, ce que TocToc est vraiment
@@ -16,13 +18,14 @@ Statut : **développement de l'API en cours** (code dans [`../platform`](../plat
 10. [09-workflows.md](09-workflows.md) — les workflows achat, réception de commande par le partenaire, livraison, et notation
 11. [10-benchmark-produit-mondial.md](10-benchmark-produit-mondial.md) — ce que font DoorDash, la Chine, le Brésil et l'Asie du Sud-Est, et ce qu'on en tire
 12. [11-reference-chowdeck.md](11-reference-chowdeck.md) — notre référence de terrain la plus proche, mise à jour au fil du temps
+13. [12-la-commande.md](12-la-commande.md) — **la commande**, l'objet central : définition, règles, cycle de vie, vocabulaire
 
 ## Décisions déjà actées
 
 | Décision | Choix | Révisable ? |
 |---|---|---|
 | Marché de lancement | Guinée (Conakry) | Non — c'est le seul marché sans acteur international déjà installé |
-| Occasion de lancement | Déjeuner de bureau — individus et petits groupes de collègues, chacun commande et paie pour lui-même | Oui, après Phase 0 (validation) |
+| Occasion de lancement | Repas de bureau, de 9h à minuit — le déjeuner, mais aussi les équipes qui travaillent tard ; commande ouverte 20 minutes puis livrée ; individus et petits groupes de collègues, chacun commande et paie pour lui-même | Oui, après Phase 0 (validation) |
 | Fonctionnalité de lancement | Une seule feature : lien de commande groupée avec effet waouh (liste en direct, choix rapide, paiement individuel) — voir [06-fonctionnalite-lancement.md](06-fonctionnalite-lancement.md) | Le principe non, l'implémentation oui |
 | Stack technique | Monolithe modulaire Node.js + Fastify + PostgreSQL/Prisma + Redis/BullMQ + Socket.io, patterns repris de `citimoov-v2` (pas Go, pas de microservices) — voir [07-architecture-mvp.md](07-architecture-mvp.md) | Oui, si le volume ou l'équipe grandissent |
 | Segment grand public | Reporté à la Phase 3, une fois la flotte et l'offre construites | Oui |
