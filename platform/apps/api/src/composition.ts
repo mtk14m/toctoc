@@ -15,6 +15,7 @@ import { PrismaOrderItemStore } from './stores/prisma-order-item-store.js'
 import { PrismaOtpStore } from './stores/prisma-otp-store.js'
 import { PrismaPartnerStore } from './stores/prisma-partner-store.js'
 import { PrismaPaymentStore } from './stores/prisma-payment-store.js'
+import { PrismaRestaurantStore } from './stores/prisma-restaurant-store.js'
 import { PrismaUserStore } from './stores/prisma-user-store.js'
 
 function createOtpSender(config: Config): OtpSender {
@@ -46,6 +47,7 @@ export function createProductionDeps(config: Config): AppDeps {
     groupOrderStore: new PrismaGroupOrderStore(prisma),
     orderItemStore: new PrismaOrderItemStore(prisma),
     partnerStore: new PrismaPartnerStore(prisma),
+    restaurantStore: new PrismaRestaurantStore(prisma),
     paymentStore: new PrismaPaymentStore(prisma),
     paymentGateway: createPaymentGateway(config),
     closingStore: new PrismaClosingStore(prisma),

@@ -102,3 +102,46 @@ export function planOrder(input: { now: Date; partnerHours: PartnerHours; rules:
 
   return { orderCutoffTime, deliveryTime }
 }
+
+/**
+ * Peut-on commencer une commande chez ce restaurant maintenant, et sinon pourquoi ? Utilisé par
+ * l'annuaire pour afficher « ouvre à 11h » ou « pas de menu aujourd'hui » au lieu d'un restaurant
+ * grisé sans explication. Applique exactement les règles de `planOrder` (jamais « disponible »
+ * pour ce que la création d'une commande refuserait), plus l'existence d'un menu ce jour-là.
+ */
+export type Availability =
+  | { available: true }
+  | {
+      available: false
+      reason:
+        | 'SERVICE_NOT_OPEN'
+        | 'TOO_LATE_TO_DELIVER'
+        | 'PARTNER_CLOSED_AT_THAT_TIME'
+        | 'NO_MENU_FOR_DATE'
+      details?: unknown
+    }
+
+export function explainAvailability(input: {
+  now: Date
+  partnerHours: PartnerHours
+  rules: ScheduleRules
+  /** Nombre de plats actifs au menu d'aujourd'hui. */
+  menuCount: number
+}): Availability {
+  try {
+    planOrder({ now: input.now, partnerHours: input.partnerHours, rules: input.rules })
+  } catch (error) {
+    if (error instanceof AppError) {
+      return {
+        available: false,
+        reason: error.code as Extract<Availability, { available: false }>['reason'],
+        ...(error.details !== undefined && { details: error.details }),
+      }
+    }
+    throw error
+  }
+
+  return input.menuCount === 0
+    ? { available: false, reason: 'NO_MENU_FOR_DATE' }
+    : { available: true }
+}

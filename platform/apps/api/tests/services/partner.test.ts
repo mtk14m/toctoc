@@ -59,22 +59,84 @@ describe('PartnerService', () => {
     })
   })
 
-  describe('listActivePartners', () => {
-    it('ne renvoie que ce dont un relais a besoin pour choisir (ni téléphone ni commission)', async () => {
-      await service.createPartner(validPartner())
+  describe('présentation dans l’annuaire', () => {
+    it('enregistre la description, le logo, la couverture et les spécialités', async () => {
+      const partner = await service.createPartner({
+        ...validPartner(),
+        description: 'Cuisine faite maison',
+        logoUrl: 'https://cdn.example.com/logo.png',
+        coverUrl: 'https://cdn.example.com/cover.jpg',
+        tags: ['riz gras', 'poulet braisé'],
+      })
 
-      const partners = await service.listActivePartners()
-
-      expect(partners).toEqual([
-        { id: expect.any(String), name: 'Chez Aïssatou', type: 'CUISINE_MAISON', city: 'Conakry' },
-      ])
+      expect(partner).toMatchObject({
+        description: 'Cuisine faite maison',
+        logoUrl: 'https://cdn.example.com/logo.png',
+        coverUrl: 'https://cdn.example.com/cover.jpg',
+        tags: ['riz gras', 'poulet braisé'],
+      })
     })
 
-    it('n’inclut pas les partenaires désactivés', async () => {
-      await service.createPartner(validPartner())
-      store.partners[0]!.active = false
+    it('n’a ni description ni image ni spécialité par défaut', async () => {
+      const partner = await service.createPartner(validPartner())
 
-      expect(await service.listActivePartners()).toEqual([])
+      expect(partner).toMatchObject({ description: null, logoUrl: null, coverUrl: null, tags: [] })
+    })
+  })
+
+  describe('updatePartner', () => {
+    let partnerId: string
+
+    beforeEach(async () => {
+      partnerId = (await service.createPartner(validPartner())).id
+    })
+
+    it('met à jour la présentation, les heures et l’activité, sans toucher au reste', async () => {
+      const updated = await service.updatePartner(partnerId, {
+        description: 'Nouvelle description',
+        tags: ['attiéké'],
+        serviceStartMinute: 660,
+        serviceEndMinute: 900,
+        active: false,
+      })
+
+      expect(updated).toMatchObject({
+        name: 'Chez Aïssatou',
+        phone: '+224621000000',
+        description: 'Nouvelle description',
+        tags: ['attiéké'],
+        serviceStartMinute: 660,
+        serviceEndMinute: 900,
+        active: false,
+      })
+    })
+
+    it('efface la description ou une image avec null', async () => {
+      await service.updatePartner(partnerId, {
+        description: 'À effacer',
+        logoUrl: 'https://cdn.example.com/a.png',
+      })
+
+      const cleared = await service.updatePartner(partnerId, { description: null, logoUrl: null })
+
+      expect(cleared).toMatchObject({ description: null, logoUrl: null })
+    })
+
+    it('répond 404 PARTNER_NOT_FOUND pour un restaurant inconnu', async () => {
+      await expect(service.updatePartner('inconnu', { active: false })).rejects.toMatchObject({
+        statusCode: 404,
+        code: 'PARTNER_NOT_FOUND',
+      })
+    })
+
+    it('refuse des heures incohérentes avec celles déjà enregistrées (422 INVALID_SERVICE_HOURS)', async () => {
+      await service.updatePartner(partnerId, { serviceStartMinute: 660, serviceEndMinute: 900 })
+
+      // début 20h00 alors que la fin enregistrée est 15h00
+      await expect(
+        service.updatePartner(partnerId, { serviceStartMinute: 1200 }),
+      ).rejects.toMatchObject({ statusCode: 422, code: 'INVALID_SERVICE_HOURS' })
+      expect(store.partners[0]).toMatchObject({ serviceStartMinute: 660 })
     })
   })
 

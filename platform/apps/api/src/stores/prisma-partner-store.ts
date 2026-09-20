@@ -3,7 +3,7 @@ import type {
   MenuItemRecord,
   NewMenuItem,
   NewPartner,
-  PartnerListItem,
+  PartnerPatch,
   PartnerRecord,
   PartnerStore,
 } from '../services/partner.js'
@@ -18,6 +18,10 @@ const partnerSelect = {
   commissionRate: true,
   serviceStartMinute: true,
   serviceEndMinute: true,
+  description: true,
+  logoUrl: true,
+  coverUrl: true,
+  tags: true,
   active: true,
 } as const
 
@@ -28,6 +32,10 @@ export class PrismaPartnerStore implements PartnerStore {
     commissionRate,
     serviceStartMinute,
     serviceEndMinute,
+    description,
+    logoUrl,
+    coverUrl,
+    tags,
     ...input
   }: NewPartner): Promise<PartnerRecord> {
     return this.db.partner.create({
@@ -37,17 +45,42 @@ export class PrismaPartnerStore implements PartnerStore {
         ...(commissionRate !== undefined && { commissionRate }),
         ...(serviceStartMinute !== undefined && { serviceStartMinute }),
         ...(serviceEndMinute !== undefined && { serviceEndMinute }),
+        ...(description !== undefined && { description }),
+        ...(logoUrl !== undefined && { logoUrl }),
+        ...(coverUrl !== undefined && { coverUrl }),
+        ...(tags !== undefined && { tags }),
       },
       select: partnerSelect,
     })
   }
 
-  listActive(): Promise<PartnerListItem[]> {
-    return this.db.partner.findMany({
-      where: { active: true },
-      select: { id: true, name: true, type: true, city: true },
-      orderBy: { name: 'asc' },
-    })
+  findById(id: string): Promise<PartnerRecord | null> {
+    return this.db.partner.findUnique({ where: { id }, select: partnerSelect })
+  }
+
+  async update(id: string, patch: PartnerPatch): Promise<PartnerRecord | null> {
+    try {
+      return await this.db.partner.update({
+        where: { id },
+        // Une clé absente ne change rien (Prisma refuse un `undefined` explicite) ; `null` efface.
+        data: {
+          ...(patch.description !== undefined && { description: patch.description }),
+          ...(patch.logoUrl !== undefined && { logoUrl: patch.logoUrl }),
+          ...(patch.coverUrl !== undefined && { coverUrl: patch.coverUrl }),
+          ...(patch.tags !== undefined && { tags: patch.tags }),
+          ...(patch.serviceStartMinute !== undefined && {
+            serviceStartMinute: patch.serviceStartMinute,
+          }),
+          ...(patch.serviceEndMinute !== undefined && { serviceEndMinute: patch.serviceEndMinute }),
+          ...(patch.active !== undefined && { active: patch.active }),
+        },
+        select: partnerSelect,
+      })
+    } catch (error) {
+      // P2025 : le restaurant n'existe pas (ou plus).
+      if ((error as { code?: string }).code === 'P2025') return null
+      throw error
+    }
   }
 
   async exists(id: string): Promise<boolean> {
