@@ -2,6 +2,8 @@ import type { ServerOptions } from 'socket.io'
 import type { RateLimiter } from './lib/rate-limiter.js'
 import type { UserStore } from './services/auth.js'
 import type { ClosingStore } from './services/closing.js'
+import type { DeliveryStore } from './services/delivery.js'
+import type { DriverStore } from './services/driver.js'
 import type { GroupOrderStore } from './services/group-order.js'
 import type { OrderItemStore } from './services/order-item.js'
 import type { OtpSender, OtpStore } from './services/otp.js'
@@ -22,6 +24,8 @@ export interface AppDeps {
   orderItemStore: OrderItemStore
   partnerStore: PartnerStore
   restaurantStore: RestaurantStore
+  deliveryStore: DeliveryStore
+  driverStore: DriverStore
   paymentStore: PaymentStore
   paymentGateway: PaymentGateway
   closingStore: ClosingStore

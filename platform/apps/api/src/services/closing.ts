@@ -1,3 +1,4 @@
+import { summarizeDishes } from '../lib/dishes.js'
 import { groupOrderRoom, orderItemRoom, type RealtimePublisher } from '../realtime/events.js'
 import type { PartnerNotifier } from './partner-notifier.js'
 import { PAYMENT_GRACE_MS } from './payment.js'
@@ -41,15 +42,7 @@ const pad = (n: number) => String(n).padStart(2, '0')
  * Dates et heures en UTC : la Guinée n'a pas d'heure d'été.
  */
 export function formatRecap(recap: RecapCandidate): string {
-  const byDish = new Map<string, number>()
-  for (const { dish, quantity } of recap.items) {
-    byDish.set(dish, (byDish.get(dish) ?? 0) + quantity)
-  }
-  const lines = [...byDish].sort(
-    ([dishA, quantityA], [dishB, quantityB]) =>
-      quantityB - quantityA || dishA.localeCompare(dishB, 'fr'),
-  )
-  const total = lines.reduce((sum, [, quantity]) => sum + quantity, 0)
+  const { dishes, total } = summarizeDishes(recap.items)
 
   const { deliveryTime: at } = recap
   const day = `${pad(at.getUTCDate())}/${pad(at.getUTCMonth() + 1)}`
@@ -57,7 +50,7 @@ export function formatRecap(recap: RecapCandidate): string {
 
   return [
     `Bonjour ${recap.partner.name}, voici la commande TocToc à préparer :`,
-    ...lines.map(([dish, quantity]) => `${quantity}× ${dish}`),
+    ...dishes.map(({ dish, quantity }) => `${quantity}× ${dish}`),
     `Total : ${total} ${total > 1 ? 'plats' : 'plat'}`,
     `Livraison le ${day} à ${time} — ${recap.deliveryAddress}`,
   ].join('\n')

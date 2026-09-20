@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import type {
+  DeliveryStatus,
   GroupOrderStatus,
   OrderItemStatus,
   PartnerType,
@@ -52,6 +53,8 @@ export interface GroupOrderRecord {
   paymentMode: PaymentMode
   creatorName: string
   partner: { id: string; name: string; type: PartnerType }
+  /** L'état de la livraison, s'il y en a une. */
+  delivery: { status: DeliveryStatus; confirmationCode: string | null } | null
 }
 
 export interface MenuEntry {
@@ -245,6 +248,13 @@ export function createGroupOrderService(deps: GroupOrderServiceDeps) {
         paymentMode: order.paymentMode,
         creatorName: order.creatorName,
         partner: { name: order.partner.name, type: order.partner.type },
+        // Le code de confirmation est la preuve de livraison : il n'existe sur la page que pendant
+        // que le livreur est en route (docs/09). Avant, il pourrait fuiter ; après, il ne sert plus.
+        delivery: order.delivery && {
+          status: order.delivery.status,
+          confirmationCode:
+            order.delivery.status === 'PICKED_UP' ? order.delivery.confirmationCode : null,
+        },
         menu,
         participants: visible.map((item): Participant => ({
           name: item.participantName,

@@ -10,6 +10,7 @@ import { ConsolePartnerNotifier, type PartnerNotifier } from './services/partner
 import { FakePaymentGateway } from './services/payment-gateway.js'
 import type { PaymentGateway } from './services/payment.js'
 import { PrismaClosingStore } from './stores/prisma-closing-store.js'
+import { PrismaDeliveryStore } from './stores/prisma-delivery-store.js'
 import { PrismaGroupOrderStore } from './stores/prisma-group-order-store.js'
 import { PrismaOrderItemStore } from './stores/prisma-order-item-store.js'
 import { PrismaOtpStore } from './stores/prisma-otp-store.js'
@@ -41,6 +42,7 @@ function createPaymentGateway(config: Config): PaymentGateway {
 
 /** Branche les vraies dépendances (Prisma, Redis). Utilisé uniquement par server.ts. */
 export function createProductionDeps(config: Config): AppDeps {
+  const deliveryStore = new PrismaDeliveryStore(prisma)
   return {
     otpStore: new PrismaOtpStore(prisma),
     userStore: new PrismaUserStore(prisma),
@@ -48,6 +50,8 @@ export function createProductionDeps(config: Config): AppDeps {
     orderItemStore: new PrismaOrderItemStore(prisma),
     partnerStore: new PrismaPartnerStore(prisma),
     restaurantStore: new PrismaRestaurantStore(prisma),
+    deliveryStore,
+    driverStore: deliveryStore,
     paymentStore: new PrismaPaymentStore(prisma),
     paymentGateway: createPaymentGateway(config),
     closingStore: new PrismaClosingStore(prisma),

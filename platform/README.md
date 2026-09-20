@@ -158,6 +158,28 @@ socket.on('orderItem:updated', console.log) // { orderItemId, status, reason: PA
 En production, l'adaptateur Redis relaie les évènements entre plusieurs instances de l'API. Les
 deux connexions Redis dédiées qu'il utilise s'ajoutent à celle de l'API.
 
+## La livraison
+
+Quand une commande est fermée (`CLOSED`), l'équipe lui assigne un livreur ; le livreur récupère les plats ;
+le groupe lui donne le code affiché sur sa page ; le livreur le saisit. Le code est **la preuve** qu'il est
+arrivé (docs/09) : il n'existe qu'entre la récupération et la livraison, et le livreur ne le voit jamais.
+
+| Qui     | Route                                                  | Rôle                                                                  |
+| ------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
+| Équipe  | `POST /admin/drivers` `{ phone, name }`                | crée un livreur (compte + fiche) ; il se connecte ensuite par OTP     |
+| Équipe  | `GET /admin/drivers`                                   | les livreurs, actifs d'abord                                          |
+| Équipe  | `GET /admin/group-orders?status=CLOSED,IN_DELIVERY`    | les commandes à traiter, avec récap et livreur                        |
+| Équipe  | `POST /admin/group-orders/:id/delivery` `{ driverId }` | assigne (201) ou réassigne (200) tant que rien n'est récupéré         |
+| Équipe  | `POST /admin/deliveries/:id/override` `{ reason }`     | confirmation manuelle, toujours tracée dans `AuditLog` avec sa raison |
+| Livreur | `GET /driver/deliveries`                               | sa tournée : où récupérer, quoi, où livrer                            |
+| Livreur | `POST /driver/deliveries/:id/picked-up`                | « récupéré » : génère le code, la commande passe en route             |
+| Livreur | `POST /driver/deliveries/:id/confirm` `{ code }`       | 5 essais au plus, puis seule l'équipe peut confirmer                  |
+
+La page publique de la commande (`GET /group-orders/:jeton`) porte `delivery: { status, confirmationCode }` :
+le code n'y figure que pendant `PICKED_UP`. En direct, `groupOrder:in_delivery` (avec le code et le temps
+estimé) puis `groupOrder:delivered`. Le rôle est relu en base à chaque appel : un livreur désactivé est refusé
+immédiatement, sans attendre l'expiration de son jeton.
+
 ## La clôture des liens et le récap partenaire
 
 Un job BullMQ tourne chaque minute au démarrage de l'API (Redis requis). Pour chaque lien `SPLIT` dont l'heure

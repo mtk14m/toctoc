@@ -114,7 +114,7 @@ Contrairement à CityMoov (matching temps réel chauffeur ↔ course, tracking G
 
 ### L'application livreur — le strict nécessaire, mais pas moins
 
-Une vue web minimale (même application React que le reste du produit, un espace différent), protégée par une connexion téléphone + mot de passe (même pattern que `staff/login` dans CityMoov). Pas d'app native, pas de carte, pas de position GPS — trois écrans :
+Une vue web minimale (même application React que le reste du produit, un espace différent), protégée par une connexion par téléphone et code OTP, comme tous les comptes (le schéma n'a pas de mot de passe ; l'équipe crée le compte du livreur, `POST /admin/drivers`, et son rôle est relu en base à chaque appel). Pas d'app native, pas de carte, pas de position GPS — trois écrans :
 
 1. **Mes livraisons du jour** : la liste des `Delivery` assignées à ce livreur, triées par heure de récupération.
 2. **Détail d'une livraison — avant récupération** : nom et adresse du partenaire, téléphone du partenaire, la liste agrégée des plats à récupérer (calculée depuis les `OrderItem` `CONFIRMED` du `GroupOrder`, ex. "6× riz gras, 3× attiéké poisson"), et un bouton unique **"Récupéré chez le partenaire"**.
@@ -153,7 +153,7 @@ sequenceDiagram
 
 **La sortie de secours doit rester une exception tracée, pas un raccourci habituel** : si le relais est injoignable ou a perdu la page, `ADMIN_PLATFORM` peut confirmer manuellement une livraison — mais cette action crée systématiquement une entrée `AuditLog` (`action = "delivery.manual_override"`), pour qu'un usage abusif de ce contournement reste visible a posteriori plutôt que de devenir une habitude silencieuse.
 
-**Assignation du livreur** : manuelle par l'équipe TocToc en Phase 1 (un ou deux livreurs pour deux ou trois immeubles, pas besoin d'algorithme de matching). Ce n'est pas une solution d'attente honteuse — DoorDash a livré ses 200 premières commandes à la main, Chowdeck a démarré avec trois motos et des réunions hebdomadaires pour organiser les tournées, voir [10-benchmark-produit-mondial.md](10-benchmark-produit-mondial.md). Le `GroupOrder` passe en `IN_DELIVERY` dès que la `Delivery` est créée avec un `driverId`, et en `DELIVERED` quand le code est validé (ou l'override Ops utilisé).
+**Assignation du livreur** : manuelle par l'équipe TocToc en Phase 1 (un ou deux livreurs pour deux ou trois immeubles, pas besoin d'algorithme de matching). Ce n'est pas une solution d'attente honteuse — DoorDash a livré ses 200 premières commandes à la main, Chowdeck a démarré avec trois motos et des réunions hebdomadaires pour organiser les tournées, voir [10-benchmark-produit-mondial.md](10-benchmark-produit-mondial.md). Le `GroupOrder` passe en `IN_DELIVERY` quand le livreur a récupéré les plats (`Delivery` à `PICKED_UP`, « livreur en route »), pas dès l'assignation — tant qu'il n'a rien récupéré, l'équipe peut encore changer de livreur — et en `DELIVERED` quand le code est validé (ou l'override Ops utilisé).
 
 **Signal de bascule vers une assignation automatisée** : pas un nombre de commandes fixé à l'avance, mais un signal opérationnel concret — le jour où la personne qui assigne les livreurs ne peut plus suivre à l'œil ou sur un tableur toutes les livraisons en cours sans erreur ni retard. Avant ce point, automatiser serait résoudre un problème qu'on n'a pas encore.
 
