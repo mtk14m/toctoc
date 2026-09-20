@@ -51,6 +51,9 @@ const envSchema = z
     // Le règlement « j'invite tout le monde » (HOST_PAYS) reste refusé tant que la charge unique du
     // créateur n'est pas construite : sans elle, ces commandes ne se fermeraient jamais.
     ENABLE_HOST_PAYS: z.stringbool().default(false),
+    // Un raccourci de développement : payer une part d'un simple appel, sans opérateur. Explicite,
+    // jamais déduit de NODE_ENV (le stack Docker local tourne en production).
+    ENABLE_PAYMENT_SIMULATOR: z.stringbool().default(false),
   })
   .superRefine((env, ctx) => {
     if (env.SERVICE_START_HOUR >= env.SERVICE_END_HOUR) {
@@ -83,6 +86,7 @@ export interface Config {
   partnerNotification: 'console'
   schedule: ScheduleRules
   hostPaysEnabled: boolean
+  paymentSimulatorEnabled: boolean
 }
 
 /**
@@ -121,5 +125,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       deliveryLeadMinutes: parsed.data.DELIVERY_LEAD_MINUTES,
     },
     hostPaysEnabled: parsed.data.ENABLE_HOST_PAYS,
+    paymentSimulatorEnabled: parsed.data.ENABLE_PAYMENT_SIMULATOR,
   }
 }

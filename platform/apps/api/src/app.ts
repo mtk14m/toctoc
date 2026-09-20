@@ -12,6 +12,7 @@ import { authRoutes } from './routes/auth.js'
 import { groupOrderRoutes } from './routes/group-orders.js'
 import { healthRoutes } from './routes/health.js'
 import { adminDeliveryRoutes, driverRoutes } from './routes/deliveries.js'
+import { devPaymentRoutes } from './routes/dev-payments.js'
 import { orderItemRoutes } from './routes/order-items.js'
 import { adminPartnerRoutes } from './routes/partners.js'
 import { ratingRoutes } from './routes/ratings.js'
@@ -26,6 +27,7 @@ import { createGroupOrderService } from './services/group-order.js'
 import { createOrderItemService } from './services/order-item.js'
 import { createOtpService } from './services/otp.js'
 import { createPartnerService } from './services/partner.js'
+import { createPaymentSimulator } from './services/payment-simulator.js'
 import { createPaymentService } from './services/payment.js'
 import { createRatingService } from './services/rating.js'
 import { createRefundService } from './services/refund.js'
@@ -158,6 +160,14 @@ export async function buildApp(config: Config, deps: AppDeps) {
   await app.register(adminDeliveryRoutes, { prefix: '/admin', deliveries, drivers })
   await app.register(driverRoutes, { prefix: '/driver', deliveries, drivers })
   await app.register(webhookRoutes, { prefix: '/webhooks', payments })
+  if (config.paymentSimulatorEnabled) {
+    const simulator = createPaymentSimulator({
+      store: deps.paymentStore,
+      payments,
+      webhookSecret: config.paymentWebhookSecret,
+    })
+    await app.register(devPaymentRoutes, { prefix: '/dev', simulator })
+  }
 
   return app
 }

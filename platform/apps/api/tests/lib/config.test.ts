@@ -167,6 +167,23 @@ describe('loadConfig', () => {
     })
   })
 
+  describe('ENABLE_PAYMENT_SIMULATOR', () => {
+    it('est désactivé par défaut : personne ne « paie » sans opérateur par accident', () => {
+      expect(loadConfig({}).paymentSimulatorEnabled).toBe(false)
+      expect(
+        loadConfig({
+          NODE_ENV: 'production',
+          JWT_SECRET: 'x'.repeat(32),
+          PAYMENT_WEBHOOK_SECRET: 'w'.repeat(32),
+        }).paymentSimulatorEnabled,
+      ).toBe(false)
+    })
+
+    it('s’active explicitement', () => {
+      expect(loadConfig({ ENABLE_PAYMENT_SIMULATOR: 'true' }).paymentSimulatorEnabled).toBe(true)
+    })
+  })
+
   describe('TRUST_PROXY', () => {
     it('est désactivé par défaut : sans proxy, X-Forwarded-For serait falsifiable', () => {
       expect(loadConfig({}).trustProxy).toBe(false)
