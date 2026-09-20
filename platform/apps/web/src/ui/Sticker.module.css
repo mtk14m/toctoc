@@ -1,0 +1,22 @@
+.sticker {
+  border: var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-5);
+}
+
+.card {
+  background: var(--card);
+}
+
+.sun {
+  background: var(--sun);
+}
+
+.tomato {
+  background: var(--tomato);
+}
+
+.leaf {
+  background: var(--leaf);
+}

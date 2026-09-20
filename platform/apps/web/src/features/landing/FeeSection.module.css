@@ -1,0 +1,23 @@
+.section {
+  padding-block: var(--space-8);
+}
+
+.inner {
+  display: grid;
+  gap: var(--space-7);
+}
+
+.copy {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 44rem;
+}
+
+.title {
+  font-size: var(--text-2xl);
+}
+
+.lead {
+  color: var(--ink-soft);
+  font-size: var(--text-lg);
+}

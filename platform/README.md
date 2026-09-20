@@ -1,6 +1,6 @@
 # TocToc — platform
 
-Monorepo pnpm : `apps/api` (Fastify), plus tard `apps/web` (React) et `packages/types`.
+Monorepo pnpm : `apps/api` (Fastify), `apps/web` (React + Vite), plus tard `packages/types`.
 Le pourquoi des choix est dans [`../docs`](../docs/README.md), notamment `07-architecture-mvp.md`.
 
 ## Démarrer
@@ -12,6 +12,20 @@ cp apps/api/.env.example apps/api/.env
 pnpm --filter @toctoc/api db:migrate           # applique les migrations Prisma
 pnpm api                                       # http://localhost:3000/health
 ```
+
+## L'application web
+
+```bash
+pnpm web                                       # http://localhost:5173 (l'API doit tourner sur :3000)
+```
+
+React 19 + Vite, sans compte à créer côté participant. L'adresse de l'API se règle avec `VITE_API_URL`
+(voir `apps/web/.env.example`) ; l'API doit autoriser l'origine du site (`CORS_ORIGIN`, par défaut
+`http://localhost:5173`). Le design est décrit par ses variables dans `apps/web/src/styles/tokens.css` :
+papier crème, contours d'encre épais, ombres pleines décalées, et les trois couleurs du drapeau guinéen.
+
+Pour la page d'accueil, seule la liste des restaurants vient de l'API ; les paliers de livraison affichés
+sont ceux de `pricing.ts` recopiés à la main (`features/landing/delivery-fees.ts`), à tenir à jour ensemble.
 
 ## Tout lancer en conteneur
 
