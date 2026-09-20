@@ -111,9 +111,23 @@ Les 20 minutes, les 45 minutes et les heures de service se règlent dans `.env` 
 
 ## Simuler un paiement (avant l'opérateur mobile money)
 
-`PAYMENT_PROVIDER=fake` : aucun opérateur derrière, mais le webhook est vérifié comme le sera celui d'un
-vrai opérateur (signature HMAC-SHA256 du corps brut, en-tête `x-toctoc-signature`). Pour « payer » une
-commande, on envoie soi-même l'évènement signé :
+`PAYMENT_PROVIDER=fake` : aucun opérateur derrière.
+
+**Le raccourci** : avec `ENABLE_PAYMENT_SIMULATOR=true` (déjà levé dans le stack Docker local, à `false`
+partout ailleurs), une seule requête paie la part, avec l'`id` renvoyé quand on rejoint :
+
+```bash
+curl -X POST localhost:3000/dev/order-items/$ORDER_ITEM_ID/payment                                # paie
+curl -X POST localhost:3000/dev/order-items/$ORDER_ITEM_ID/payment -H 'content-type: application/json' \
+  -d '{"outcome":"FAILED"}'                                                                      # échoue
+```
+
+Il n'a aucune authentification : le serveur l'écrit dans ses logs au démarrage. Il ne contourne rien : il
+envoie au service un webhook signé, comme l'opérateur, donc les mêmes règles s'appliquent.
+
+**À la main** : le webhook est vérifié comme le sera celui d'un vrai opérateur (signature HMAC-SHA256 du
+corps brut, en-tête `x-toctoc-signature`). Pour « payer » une commande, on envoie soi-même l'évènement
+signé :
 
 ```bash
 # 1. rejoindre un lien (route publique) : la réponse annonce `payment: { status: "PENDING" }`

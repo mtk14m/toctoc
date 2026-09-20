@@ -65,6 +65,8 @@ export type SettleResult =
 /** Persistance des paiements. Prisma en production, en mémoire dans les tests. */
 export interface PaymentStore {
   findById(id: string): Promise<PaymentRecord | null>
+  /** Le paiement d'une part (un seul par part), ou `null` si elle n'en a pas. */
+  findByOrderItemId(orderItemId: string): Promise<PaymentRecord | null>
   /** Commandes non annulées du lien : c'est ce qui détermine le rang du prochain arrivant. */
   countActiveOrderItems(groupOrderId: string): Promise<number>
   /**

@@ -4,7 +4,7 @@ import { AppError } from '../lib/errors.js'
 import { safeEqual } from '../lib/safe-equal.js'
 import type { PaymentEvent, PaymentGateway, PaymentInitiation, WebhookRequest } from './payment.js'
 
-const SIGNATURE_HEADER = 'x-toctoc-signature'
+export const SIGNATURE_HEADER = 'x-toctoc-signature'
 
 const eventSchema = z.object({
   reference: z.string().min(1),

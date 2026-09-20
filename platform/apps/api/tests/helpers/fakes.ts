@@ -392,6 +392,11 @@ export class InMemoryPaymentStore implements PaymentStore {
     return item
   }
 
+  async findByOrderItemId(orderItemId: string): Promise<PaymentRecord | null> {
+    const payment = this.payments.find((p) => p.orderItemId === orderItemId)
+    return payment ? this.findById(payment.id) : null
+  }
+
   async findById(id: string): Promise<PaymentRecord | null> {
     const payment = this.payments.find((p) => p.id === id)
     if (!payment) return null
